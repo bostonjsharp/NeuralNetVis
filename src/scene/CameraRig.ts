@@ -20,7 +20,7 @@ export class CameraRig {
   // Framed so the network floats in the wall's upper band, clear of the
   // HUD panels along the bottom edge.
   private readonly interactivePosition = new THREE.Vector3(-2, 0.6, 32.5);
-  private readonly interactiveTarget = new THREE.Vector3(-2, -1.4, 0);
+  private readonly interactiveTarget = new THREE.Vector3(-2, -2.6, 0);
 
   constructor(private readonly camera: THREE.PerspectiveCamera) {
     // Waypoints keep ~20+ units out AND never swing far enough sideways to

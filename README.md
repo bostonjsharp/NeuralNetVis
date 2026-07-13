@@ -12,6 +12,11 @@ the browser — every glowing pulse you see is real math.
   sample), and watch *your* drawing get normalized, streamed through the
   layers, and answered — with honest confidence ("got it, 32% sure" happens,
   and that's the lesson).
+- **Hand gestures (webcam, optional):** ✊ a closed fist is pen-down, ✋ an
+  open hand lifts the pen to reposition between strokes, ✌️ held for half a
+  second clears the pad. The drawing auto-fires once the pen stays up.
+  MediaPipe hand tracking runs locally (assets staged into `public/` by
+  `npm install`); with no camera or permission the app is mouse-only.
 - **Color language:** orange connections excite the next neuron, blue ones
   inhibit; brightness = activation strength.
 

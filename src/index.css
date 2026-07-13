@@ -233,8 +233,10 @@ body {
 /* ---- interactive panel (bottom-left) ---- */
 
 .hud-panel {
+  /* footron reserves the bottom-left corner for its QR-code overlay —
+     the panel starts right of that zone. */
   position: absolute;
-  left: 56px;
+  left: 430px;
   bottom: 44px;
   display: flex;
   flex-direction: row;
@@ -274,6 +276,33 @@ body {
 .draw-pad--disabled {
   opacity: 0.55;
   cursor: wait;
+}
+
+.draw-pad-wrap {
+  position: relative;
+}
+
+/* Hand-gesture cursor over the pad: hollow ring while hovering (open
+   hand), filled when drawing (fist). */
+.gesture-cursor {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  border: 3px solid var(--cool);
+  box-shadow: 0 0 14px rgba(77, 191, 255, 0.7);
+  pointer-events: none;
+}
+
+.gesture-cursor[data-drawing="true"] {
+  background: var(--cool);
+  border-color: #fff;
+}
+
+.hud-panel__gesture {
+  font-size: 20px;
+  color: var(--cool);
 }
 
 .hud-panel__clear {
@@ -336,23 +365,22 @@ body {
 /* ---- output bars (right) ---- */
 
 .hud-output {
-  /* Bottom-center band, clear of both the draw panel (left) and the 3D
-     output column (right edge). */
+  /* Tucked into the bottom-right corner, compact. */
   position: absolute;
-  right: 760px;
+  right: 44px;
   bottom: 44px;
-  width: 480px;
+  width: 380px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   pointer-events: none;
 }
 
 .output-bars {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 18px 24px;
+  gap: 5px;
+  padding: 14px 20px;
   background: var(--panel);
   border: 2px solid var(--panel-border);
   border-radius: 22px;
@@ -361,10 +389,10 @@ body {
 
 .output-bar {
   display: grid;
-  grid-template-columns: 34px 1fr 72px;
+  grid-template-columns: 28px 1fr 60px;
   align-items: center;
-  gap: 12px;
-  font-size: 22px;
+  gap: 10px;
+  font-size: 19px;
   font-weight: 500;
 }
 
@@ -380,7 +408,7 @@ body {
 }
 
 .output-bar__track {
-  height: 14px;
+  height: 12px;
   border-radius: 999px;
   background: rgba(40, 52, 96, 0.55);
   overflow: hidden;
@@ -405,12 +433,12 @@ body {
 }
 
 .hud-verdict {
-  padding: 16px 30px;
+  padding: 14px 24px;
   background: var(--panel);
   border: 2px solid var(--panel-border);
-  border-radius: 22px;
+  border-radius: 20px;
   box-shadow: var(--glow);
-  font-size: 27px;
+  font-size: 23px;
   font-weight: 500;
   text-align: center;
   animation: card-in 0.5s ease both;

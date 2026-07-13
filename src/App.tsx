@@ -4,6 +4,7 @@ import weightsJson from "./assets/weights.json";
 import {
   ATTRACT_FIRE_INTERVAL_MS,
   AUTO_FIRE_DELAY_MS,
+  DRAW_PAD_SIZE,
   IDLE_MS,
   STAGE_HEIGHT,
   STAGE_WIDTH,
@@ -12,6 +13,8 @@ import { createAttractScheduler, type AttractScheduler } from "./app/attractLoop
 import { initialState, reduce, type InferenceSummary } from "./app/state";
 import Hud from "./hud/Hud";
 import Stage from "./hud/Stage";
+import { startHandTracking, type GestureState } from "./gesture/handTracker";
+import type { DrawPadHandle } from "./hud/DrawPad";
 import { forwardPass, type ForwardResult } from "./nn/inference";
 import { downsampleTo28, preprocessDrawing } from "./nn/preprocess";
 import {
@@ -42,6 +45,9 @@ export default function App() {
 
   const [displayed, setDisplayed] = useState<InferenceSummary | null>(null);
   const [padReset, setPadReset] = useState(0);
+  const [gestureActive, setGestureActive] = useState(false);
+  const padRef = useRef<DrawPadHandle>(null);
+  const gestureDrawingRef = useRef(false);
   const barsTimer = useRef(0);
   const cinematicTimer = useRef(0);
   const autoFireTimer = useRef(0);
@@ -149,6 +155,63 @@ export default function App() {
     setDisplayed(null);
   });
 
+  // Optional webcam hand control: ✊ fist = pen down, ✋ open = pen lifted
+  // (reposition between strokes; the drawing auto-fires once the pen stays
+  // up), ✌️ held = clear the pad. Fails silently into mouse-only when
+  // there's no camera/permission.
+  useEffect(() => {
+    let dispose: (() => void) | undefined;
+    let cancelled = false;
+    let prevPose: GestureState["pose"] = "open";
+    const onGesture = (g: GestureState) => {
+      if (g.present) window.dispatchEvent(new Event("gesture-activity"));
+      const mode = stateRef.current.mode;
+      if (!g.present) {
+        prevPose = "open";
+        if (gestureDrawingRef.current) {
+          gestureDrawingRef.current = false;
+          padRef.current?.penUp();
+        }
+        padRef.current?.setCursor(null);
+        return;
+      }
+      const poseChanged = g.pose !== prevPose;
+      prevPose = g.pose;
+      if (mode === "attract") {
+        if (g.pose === "fist") dispatch({ type: "userActive" });
+        return;
+      }
+      const x = g.x * DRAW_PAD_SIZE;
+      const y = g.y * DRAW_PAD_SIZE;
+      if (g.pose === "fist") {
+        if (gestureDrawingRef.current) {
+          padRef.current?.penMove(x, y);
+        } else {
+          gestureDrawingRef.current = true;
+          padRef.current?.penDown(x, y);
+        }
+      } else if (gestureDrawingRef.current) {
+        gestureDrawingRef.current = false;
+        padRef.current?.penUp();
+      }
+      if (g.pose === "two" && poseChanged) handleClear();
+      padRef.current?.setCursor({ x, y, drawing: g.pose === "fist" && mode !== "infer" });
+    };
+    startHandTracking(onGesture)
+      .then((stop) => {
+        if (cancelled) stop();
+        else {
+          dispose = stop;
+          setGestureActive(true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, []);
+
   const fireInteractive = (
     pixels: Float32Array,
     source: InferenceSummary["source"],
@@ -213,6 +276,8 @@ export default function App() {
         mode={state.mode}
         displayed={displayed}
         padReset={padReset}
+        padRef={padRef}
+        gestureActive={gestureActive}
         onStrokeStart={handleStrokeStart}
         onDraw={handleDraw}
         onStrokeEnd={handleStrokeEnd}

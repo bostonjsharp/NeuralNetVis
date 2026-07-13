@@ -1,5 +1,6 @@
+import type { Ref } from "react";
 import type { InferenceSummary, Mode } from "../app/state";
-import DrawPad from "./DrawPad";
+import DrawPad, { type DrawPadHandle } from "./DrawPad";
 import FactCards from "./FactCards";
 import Labels from "./Labels";
 import OutputBars, { verdictText } from "./OutputBars";
@@ -10,6 +11,9 @@ interface HudProps {
   /** Result to show in the bars/verdict (null until the cinematic's output beat). */
   displayed: InferenceSummary | null;
   padReset: number;
+  padRef: Ref<DrawPadHandle>;
+  /** True when webcam hand tracking is running. */
+  gestureActive: boolean;
   onStrokeStart: () => void;
   onDraw: (pixels: Float32Array, width: number, height: number) => void;
   onStrokeEnd: (pixels: Float32Array, width: number, height: number) => void;
@@ -21,6 +25,8 @@ export default function Hud({
   mode,
   displayed,
   padReset,
+  padRef,
+  gestureActive,
   onStrokeStart,
   onDraw,
   onStrokeEnd,
@@ -42,13 +48,18 @@ export default function Hud({
           {displayed && (
             <div className="hud-verdict hud-verdict--attract">{fullVerdict(displayed)}</div>
           )}
-          <div className="hud-hint">Move the mouse to try it yourself</div>
+          <div className="hud-hint">
+            {gestureActive
+              ? "Move the mouse — or make a ✊ fist — to try it yourself"
+              : "Move the mouse to try it yourself"}
+          </div>
           <FactCards />
         </>
       ) : (
         <>
           <div className="hud-panel">
             <DrawPad
+              ref={padRef}
               disabled={busy}
               resetKey={padReset}
               onStrokeStart={onStrokeStart}
@@ -57,6 +68,11 @@ export default function Hud({
             />
             <div className="hud-panel__side">
               <div className="hud-panel__title">{busy ? "Thinking…" : "Draw a digit 0–9"}</div>
+              {gestureActive && !busy && (
+                <div className="hud-panel__gesture">
+                  ✊ draws · ✋ lifts the pen · ✌️ hold to clear
+                </div>
+              )}
               <button className="hud-panel__clear" onClick={onClear} disabled={busy}>
                 Clear
               </button>
