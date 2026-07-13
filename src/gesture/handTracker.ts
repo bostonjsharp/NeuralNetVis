@@ -10,6 +10,7 @@ import {
   pickPrimaryHand,
   POSE,
   PoseStabilizer,
+  RAISE_LINE,
   WRIST,
   wristsClose,
   type HandPose,
@@ -56,6 +57,9 @@ export interface HandDebugFrame {
     rightWrist: Landmark;
     crossed: boolean;
   } | null;
+  /** True while the pen is being steered by the body-pose wrist because
+   *  hand detection lost the fist. */
+  penFallback: boolean;
   crossed: boolean;
   /** Last state actually emitted to the app. */
   state: GestureState | null;
@@ -119,6 +123,14 @@ export async function startHandTracking(
   let hadHand = false;
   let missedFrames = 0;
   let lastPrimaryPalm: Landmark | null = null;
+  // Pose-wrist fallback: hand detection routinely loses a clenched fist at
+  // 2m, but the body model keeps tracking the wrist. While both are
+  // visible we learn which body wrist is the pen and the palm's offset
+  // from it; on hand loss the pen keeps moving from the pose wrist.
+  let penSide: "left" | "right" | null = null;
+  const palmOffset = { x: 0, y: 0 };
+  let fallbackFrames = 0;
+  const FALLBACK_MAX_FRAMES = 90; // ~3s of pose-steered pen before giving up
   let raf = 0;
   let lastVideoTime = -1;
   let disposed = false;
@@ -153,6 +165,17 @@ export async function startHandTracking(
     const primaryIndex =
       hands.length > 0 ? pickPrimaryHand(hands.map((h) => h[PALM]), lastPrimaryPalm) : -1;
 
+    const penWrist =
+      bodyPose && penSide
+        ? bodyPose[penSide === "left" ? POSE.leftWrist : POSE.rightWrist]
+        : undefined;
+    const canFallback =
+      hands.length === 0 &&
+      hadHand &&
+      !!penWrist &&
+      (penWrist.visibility ?? 1) > 0.5 &&
+      fallbackFrames < FALLBACK_MAX_FRAMES;
+
     if (debug) {
       const primaryLandmarks = primaryIndex >= 0 ? hands[primaryIndex] : null;
       debug.onFrame({
@@ -172,16 +195,39 @@ export async function startHandTracking(
               crossed: poseCrossed,
             }
           : null,
+        penFallback: canFallback,
         crossed,
         state: lastEmitted,
       });
     }
     if (hands.length === 0) {
+      if (canFallback && penWrist) {
+        // Steer the pen from the body wrist; keep the current pose (a
+        // lost hand mid-draw is almost always still a fist — open hands
+        // redetect immediately).
+        fallbackFrames++;
+        missedFrames = 0;
+        const estimate = { x: penWrist.x + palmOffset.x, y: penWrist.y + palmOffset.y };
+        const mapped = mapper.update(estimate, smoothSpan || 0.04);
+        smoothX += (mapped.x - smoothX) * SMOOTHING;
+        smoothY += (mapped.y - smoothY) * SMOOTHING;
+        lastPrimaryPalm = estimate;
+        emit({
+          present: true,
+          x: smoothX,
+          y: smoothY,
+          pose: lastEmitted?.present ? lastEmitted.pose : "open",
+          raised: estimate.y < RAISE_LINE,
+          crossed,
+        });
+        return;
+      }
       if (hadHand && ++missedFrames > ABSENCE_GRACE_FRAMES) {
         hadHand = false;
         stabilizer.reset();
         mapper.reset();
         lastPrimaryPalm = null;
+        penSide = null;
         emit({
           present: false,
           x: smoothX,
@@ -194,8 +240,21 @@ export async function startHandTracking(
       return;
     }
     missedFrames = 0;
+    fallbackFrames = 0;
     const primary = hands[primaryIndex];
     lastPrimaryPalm = { x: primary[PALM].x, y: primary[PALM].y };
+    // Learn which body wrist is the pen and the palm's offset from it
+    if (bodyPose) {
+      const palm = primary[PALM];
+      const leftWrist = bodyPose[POSE.leftWrist];
+      const rightWrist = bodyPose[POSE.rightWrist];
+      const dLeft = Math.hypot(leftWrist.x - palm.x, leftWrist.y - palm.y);
+      const dRight = Math.hypot(rightWrist.x - palm.x, rightWrist.y - palm.y);
+      penSide = dLeft < dRight ? "left" : "right";
+      const wristLm = dLeft < dRight ? leftWrist : rightWrist;
+      palmOffset.x += (palm.x - wristLm.x - palmOffset.x) * 0.2;
+      palmOffset.y += (palm.y - wristLm.y - palmOffset.y) * 0.2;
+    }
     // Smooth the span so a single misread frame doesn't warp the mapper box
     const span = handSpan(primary);
     smoothSpan = smoothSpan === 0 ? span : smoothSpan + (span - smoothSpan) * 0.1;

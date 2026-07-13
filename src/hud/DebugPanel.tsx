@@ -127,7 +127,7 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
 
       const s = frame.state;
       status.textContent = [
-        `hands: ${frame.hands.length}`,
+        `hands: ${frame.hands.length}${frame.penFallback ? " (pen on body wrist)" : ""}`,
         `✕: ${frame.crossed}${frame.forearms ? ` (arms ${frame.forearms.crossed ? "crossed" : "apart"})` : " (no body pose)"}`,
         s
           ? `emitted: ${s.present ? `${s.pose}${s.raised ? " · raised" : ""} @ ${s.x.toFixed(2)},${s.y.toFixed(2)}` : "absent"}`
