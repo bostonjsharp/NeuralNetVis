@@ -48,9 +48,9 @@ export class WinnerFlare {
     this.mesh.visible = envelope > 0.001;
     if (!this.mesh.visible) return;
     this.mesh.quaternion.copy(camera.quaternion);
-    const scale = 1.2 + 3.6 * (1 - Math.pow(1 - envelope, 2));
+    const scale = 1.2 + 2.6 * (1 - Math.pow(1 - envelope, 2));
     this.mesh.scale.setScalar(scale);
-    this.material.opacity = 0.65 * envelope;
+    this.material.opacity = 0.5 * envelope;
   }
 
   dispose(): void {

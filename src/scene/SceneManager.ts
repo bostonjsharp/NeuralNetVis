@@ -95,7 +95,7 @@ export function createScene(
           brightness += reveal * level * 1.45;
           scale = neuronPop(tSinceFire, layer, i, count) * (1 + 0.22 * level * reveal);
           if (layer === 2 && i === fireResult.argmax) {
-            brightness += 1.1 * flareEnv;
+            brightness += 0.65 * flareEnv;
             scale += 0.3 * flareEnv;
             warmth = Math.max(flareEnv, 0.4 * reveal * level);
           }
@@ -121,8 +121,9 @@ export function createScene(
     starfield.update(elapsed);
     pulses.update(elapsed);
     inputPlane.setBrightness(fireResult ? inputRamp(tSinceFire) : 1);
+    // Stage 0's 512 lines share one small screen region — halve its glow lift
     connections.setStageGlow(
-      fireResult ? stageGlow(tSinceFire, 0) : 0,
+      fireResult ? 0.5 * stageGlow(tSinceFire, 0) : 0,
       fireResult ? stageGlow(tSinceFire, 1) : 0,
       fireResult ? stageGlow(tSinceFire, 2) : 0
     );
@@ -130,7 +131,7 @@ export function createScene(
     const outputReveal = fireResult ? neuronReveal(tSinceFire, 2, 0, 1) : 0;
     glyphs.update(fireResult ? fireResult.probs : null, Math.max(outputReveal, fireResult ? 0.35 : 0.2), fireResult?.argmax ?? 0, flareEnv);
     flare.update(flareEnv, camera);
-    post.bloom.strength = BLOOM_BASE_STRENGTH + 0.3 * flareEnv;
+    post.bloom.strength = BLOOM_BASE_STRENGTH + 0.18 * flareEnv;
 
     post.render();
   }
