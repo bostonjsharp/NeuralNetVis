@@ -163,11 +163,13 @@ export default function App() {
     let dispose: (() => void) | undefined;
     let cancelled = false;
     let prevPose: GestureState["pose"] = "open";
+    let attractPresence = 0;
     const onGesture = (g: GestureState) => {
       if (g.present) window.dispatchEvent(new Event("gesture-activity"));
       const mode = stateRef.current.mode;
       if (!g.present) {
         prevPose = "open";
+        attractPresence = 0;
         if (gestureDrawingRef.current) {
           gestureDrawingRef.current = false;
           padRef.current?.penUp();
@@ -178,9 +180,17 @@ export default function App() {
       const poseChanged = g.pose !== prevPose;
       prevPose = g.pose;
       if (mode === "attract") {
-        if (g.pose === "fist") dispatch({ type: "userActive" });
+        // A hand held up briefly (~0.7s of frames) or a fist wakes the wall —
+        // brief enough to feel instant, long enough that a passerby's hand
+        // flashing through the camera doesn't yank the attract loop.
+        attractPresence++;
+        if (g.pose === "fist" || attractPresence >= 20) {
+          attractPresence = 0;
+          dispatch({ type: "userActive" });
+        }
         return;
       }
+      attractPresence = 0;
       const x = g.x * DRAW_PAD_SIZE;
       const y = g.y * DRAW_PAD_SIZE;
       if (g.pose === "fist") {
@@ -197,17 +207,30 @@ export default function App() {
       if (g.pose === "two" && poseChanged) handleClear();
       padRef.current?.setCursor({ x, y, drawing: g.pose === "fist" && mode !== "infer" });
     };
-    startHandTracking(onGesture)
-      .then((stop) => {
-        if (cancelled) stop();
-        else {
-          dispose = stop;
-          setGestureActive(true);
-        }
-      })
-      .catch(() => {});
+    // Windows webcams are typically single-consumer — if another app holds
+    // the camera at load, keep retrying instead of giving up forever.
+    let retryTimer = 0;
+    const attempt = () => {
+      startHandTracking(onGesture)
+        .then((stop) => {
+          if (cancelled) stop();
+          else {
+            dispose = stop;
+            setGestureActive(true);
+          }
+        })
+        .catch((err: unknown) => {
+          console.warn(
+            "hand tracking unavailable (no camera, permission denied, or camera in use) — retrying in 15s:",
+            err instanceof Error ? err.message : err
+          );
+          if (!cancelled) retryTimer = window.setTimeout(attempt, 15_000);
+        });
+    };
+    attempt();
     return () => {
       cancelled = true;
+      window.clearTimeout(retryTimer);
       dispose?.();
     };
   }, []);
