@@ -305,6 +305,50 @@ body {
   color: var(--cool);
 }
 
+/* ---- raise-hand-to-start progress ring (attract mode) ---- */
+
+.wake-ring-wrap {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  pointer-events: none;
+}
+
+.wake-ring-face {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  display: grid;
+  place-items: center;
+}
+
+.wake-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  /* conic-gradient fill set inline from wakeProgress; masked to a donut */
+  -webkit-mask: radial-gradient(closest-side, transparent 66%, #000 67%);
+  mask: radial-gradient(closest-side, transparent 66%, #000 67%);
+  filter: drop-shadow(0 0 22px rgba(77, 191, 255, 0.55));
+}
+
+.wake-ring__hand {
+  font-size: 92px;
+}
+
+.wake-ring__label {
+  font-size: 38px;
+  font-weight: 700;
+  color: var(--cool);
+  text-shadow: 0 0 20px rgba(77, 191, 255, 0.6);
+  white-space: nowrap;
+}
+
 .hud-panel__clear {
   font-family: inherit;
   font-size: 25px;

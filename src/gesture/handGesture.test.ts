@@ -5,6 +5,7 @@ import {
   isRaised,
   mapToPad,
   PALM,
+  palmsClose,
   PoseStabilizer,
   type Landmark,
 } from "./handGesture";
@@ -33,15 +34,7 @@ describe("classifyHand", () => {
     expect(classifyHand(hand(0.15))).toBe("fist");
   });
 
-  it("reads index+middle only as the ✌️ clear pose", () => {
-    const landmarks = hand(0.6);
-    // Fold ring and pinky, leaving index+middle extended
-    landmarks[16] = { x: 0, y: -0.1 };
-    landmarks[20] = { x: 0, y: -0.1 };
-    expect(classifyHand(landmarks)).toBe("two");
-  });
-
-  it("reads other two-extended combos as unknown", () => {
+  it("reads a partially folded hand as unknown", () => {
     const landmarks = hand(0.6);
     // Fold index and middle, leaving ring+pinky extended
     landmarks[8] = { x: 0, y: -0.1 };
@@ -71,6 +64,11 @@ describe("distance and raise gates", () => {
     landmarks[PALM] = { x: 0.5, y: 0.6 };
     expect(isRaised(landmarks)).toBe(false);
   });
+
+  it("palmsClose detects arms crossed / hands together", () => {
+    expect(palmsClose({ x: 0.45, y: 0.5 }, { x: 0.55, y: 0.5 })).toBe(true);
+    expect(palmsClose({ x: 0.2, y: 0.5 }, { x: 0.8, y: 0.5 })).toBe(false);
+  });
 });
 
 describe("mapToPad", () => {
@@ -93,7 +91,7 @@ describe("mapToPad", () => {
 });
 
 describe("PoseStabilizer", () => {
-  const holds = { fist: 3, open: 3, two: 5 };
+  const holds = { fist: 3, open: 3 };
 
   it("requires consecutive frames before flipping state", () => {
     const stabilizer = new PoseStabilizer(holds);
@@ -116,13 +114,5 @@ describe("PoseStabilizer", () => {
     const stabilizer = new PoseStabilizer(holds);
     for (let i = 0; i < 3; i++) stabilizer.update("fist");
     expect(stabilizer.update("unknown")).toBe("fist");
-  });
-
-  it("the ✌️ clear pose needs its longer deliberate hold", () => {
-    const stabilizer = new PoseStabilizer(holds);
-    for (let i = 0; i < 4; i++) {
-      expect(stabilizer.update("two")).toBe("open");
-    }
-    expect(stabilizer.update("two")).toBe("two");
   });
 });

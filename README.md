@@ -12,14 +12,16 @@ the browser — every glowing pulse you see is real math.
   sample), and watch *your* drawing get normalized, streamed through the
   layers, and answered — with honest confidence ("got it, 32% sure" happens,
   and that's the lesson).
-- **Hand gestures (webcam, optional):** raise an ✋ open hand high and hold
-  it ~1.2s to start; then ✊ a closed fist is pen-down, ✋ an open hand lifts
-  the pen to reposition between strokes, ✌️ held clears the pad. The drawing
-  auto-fires once the pen stays up. Tuned for a camera 2+ meters away:
-  poses only register when clearly clenched/splayed (half-open hands are
-  ignored), and hands too small in frame are filtered out. MediaPipe hand
-  tracking runs locally (assets staged into `public/` by `npm install`);
-  with no camera or permission the app is mouse-only.
+- **Hand gestures (webcam, optional):** raise a hand ✋ and hold it — a
+  progress ring fills over 5 seconds, then you're in. ✊ a closed fist is
+  pen-down, ✋ an open hand lifts the pen to reposition between strokes,
+  and crossing both arms in an ✕ clears the pad. The drawing auto-fires
+  once the pen stays up. Tuned for a camera 2+ meters away: gestures are
+  arm-scale (no finger-counting poses), fist/open only register when
+  clearly clenched/splayed, tracking blips get a grace window, and hands
+  too small in frame are filtered out. MediaPipe hand tracking runs
+  locally (assets staged into `public/` by `npm install`); with no camera
+  or permission the app is mouse-only.
 - **Color language:** orange connections excite the next neuron, blue ones
   inhibit; brightness = activation strength.
 

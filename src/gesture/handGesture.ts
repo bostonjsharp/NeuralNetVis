@@ -10,7 +10,7 @@ export interface Landmark {
   y: number;
 }
 
-export type HandPose = "fist" | "open" | "two" | "unknown";
+export type HandPose = "fist" | "open" | "unknown";
 
 /** Finger [PIP, TIP] landmark indices — thumb excluded (unreliable folder). */
 const FINGERS: readonly [number, number][] = [
@@ -37,16 +37,11 @@ export function classifyHand(landmarks: Landmark[]): HandPose {
   const dist = (a: Landmark) => Math.hypot(a.x - wrist.x, a.y - wrist.y);
   let extendedCount = 0;
   let foldedCount = 0;
-  const extended: boolean[] = [];
-  const folded: boolean[] = [];
   for (const [pip, tip] of FINGERS) {
     const ratio = dist(landmarks[tip]) / Math.max(dist(landmarks[pip]), 1e-6);
-    extended.push(ratio > EXTENDED_RATIO);
-    folded.push(ratio < FOLDED_RATIO);
     if (ratio > EXTENDED_RATIO) extendedCount++;
     if (ratio < FOLDED_RATIO) foldedCount++;
   }
-  if (extended[0] && extended[1] && folded[2] && folded[3]) return "two";
   if (foldedCount >= 3 && extendedCount === 0) return "fist";
   if (extendedCount >= 3 && foldedCount === 0) return "open";
   return "unknown";
@@ -55,9 +50,10 @@ export function classifyHand(landmarks: Landmark[]): HandPose {
 /** Palm anchor: middle-finger MCP tracks the hand's center steadily. */
 export const PALM = 9;
 
-/** A hand is "raised" when the palm sits in the top band of the camera
- *  frame — an arm held high, not a hand at waist height. */
-const RAISE_LINE = 0.35;
+/** A hand is "raised" when the palm sits in the upper part of the camera
+ *  frame — an arm held up, not a hand at waist height. Any pose counts;
+ *  at 2m the 5-second hold is the false-positive filter, not the pose. */
+const RAISE_LINE = 0.45;
 
 export function isRaised(landmarks: Landmark[]): boolean {
   return landmarks[PALM].y < RAISE_LINE;
@@ -65,15 +61,25 @@ export function isRaised(landmarks: Landmark[]): boolean {
 
 /**
  * Wrist→palm span in normalized camera units — a proxy for how close the
- * hand is. Visitors stand ~2m away; anything smaller is someone much
- * farther out (or a misdetection) and is ignored entirely.
+ * hand is. A visitor's hand at ~2m spans roughly 0.03–0.05 of a typical
+ * webcam frame; anything below this is someone much farther out (or a
+ * misdetection) and is ignored entirely.
  */
-const MIN_HAND_SPAN = 0.05;
+const MIN_HAND_SPAN = 0.022;
 
 export function isCloseEnough(landmarks: Landmark[]): boolean {
   const wrist = landmarks[WRIST];
   const palm = landmarks[PALM];
   return Math.hypot(palm.x - wrist.x, palm.y - wrist.y) >= MIN_HAND_SPAN;
+}
+
+/** Two palms near each other — arms crossed in an ✕ (or hands brought
+ *  together) — the arm-scale clear gesture, readable at any distance the
+ *  hands themselves are detectable. */
+const CROSS_DISTANCE = 0.22;
+
+export function palmsClose(a: Landmark, b: Landmark): boolean {
+  return Math.hypot(a.x - b.x, a.y - b.y) < CROSS_DISTANCE;
 }
 
 /**
@@ -94,14 +100,12 @@ export function mapToPad(cameraX: number, cameraY: number): { x: number; y: numb
   };
 }
 
-/** Frames a pose flip must hold before it's reported. ✌️ (clear) needs a
- *  deliberate hold because fingers pass through two-extended mid-curl;
- *  fist/open holds are longer than strictly needed because landmarks are
- *  noisier with the hand small in frame at 2m. */
+/** Frames a pose flip must hold before it's reported — longer than
+ *  strictly needed because landmarks are noisier with the hand small in
+ *  frame at 2m. */
 const DEFAULT_HOLD_FRAMES: Record<Exclude<HandPose, "unknown">, number> = {
   fist: 5,
   open: 5,
-  two: 15,
 };
 
 /**
