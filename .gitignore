@@ -3,3 +3,7 @@ web
 .mnist-cache
 tsconfig.tsbuildinfo
 *.local
+
+.playwright-mcp
+/attract-*.png
+/*.png
