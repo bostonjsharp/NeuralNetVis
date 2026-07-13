@@ -76,7 +76,7 @@ export class PulseSystem {
         uStageDur: { value: new THREE.Vector3(...FIRE.stageDur) },
         // Stage 0 fires 3× the particles of the deeper stages from one small
         // region — without damping it novas out and hides the digit.
-        uStageAlpha: { value: new THREE.Vector3(0.4, 0.85, 1.0) },
+        uStageAlpha: { value: new THREE.Vector3(0.35, 0.7, 0.85) },
         uStageSize: { value: new THREE.Vector3(0.55, 0.9, 1.0) },
       },
       vertexShader: /* glsl */ `
@@ -108,7 +108,7 @@ export class PulseSystem {
           vAlpha = visible * fade * (0.25 + 0.75 * mag) * dot(aStageMask, uStageAlpha);
           vec3 warm = vec3(1.0, 0.62, 0.22);
           vec3 cool = vec3(0.30, 0.75, 1.0);
-          vColor = (aSignal >= 0.0 ? warm : cool) * (0.6 + 2.6 * mag);
+          vColor = (aSignal >= 0.0 ? warm : cool) * (0.45 + 1.7 * mag);
           gl_PointSize = visible * (20.0 + 46.0 * mag) * dot(aStageMask, uStageSize) * (24.0 / max(1.0, -mvPosition.z));
         }
       `,

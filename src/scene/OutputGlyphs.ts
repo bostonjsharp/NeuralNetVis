@@ -45,9 +45,9 @@ export class OutputGlyphs {
       const isWinner = probs !== null && digit === winner;
       const glow = isWinner ? flare : 0;
       material.color.setRGB(
-        0.28 + 1.5 * lit + 1.6 * glow,
-        0.32 + 1.4 * lit + 1.5 * glow,
-        0.42 + 1.1 * lit + 1.2 * glow
+        0.28 + 1.0 * lit + 1.0 * glow,
+        0.32 + 0.95 * lit + 0.95 * glow,
+        0.42 + 0.75 * lit + 0.75 * glow
       );
       material.opacity = 0.5 + 0.5 * reveal;
       sprite.scale.setScalar(1.05 * (1 + 0.55 * glow + 0.35 * lit * reveal));

@@ -100,25 +100,25 @@ body {
 
 .hud-title h1 {
   margin: 0;
-  font-size: 72px;
+  font-size: 56px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  text-shadow: 0 0 40px rgba(90, 150, 255, 0.55);
+  text-shadow: 0 0 32px rgba(90, 150, 255, 0.45);
 }
 
 .hud-title p {
   margin: 8px 0 0;
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 400;
   color: var(--ink-dim);
 }
 
 .hud-hint {
   position: absolute;
-  bottom: 170px;
+  bottom: 176px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 40px;
+  font-size: 32px;
   font-weight: 500;
   color: var(--cool);
   animation: hint-breathe 2.6s ease-in-out infinite;
@@ -139,13 +139,13 @@ body {
   bottom: 56px;
   left: 50%;
   transform: translateX(-50%);
-  max-width: 1500px;
-  padding: 26px 54px;
+  max-width: 1200px;
+  padding: 20px 44px;
   background: var(--panel);
   border: 2px solid var(--panel-border);
   border-radius: 22px;
   box-shadow: var(--glow);
-  font-size: 38px;
+  font-size: 30px;
   font-weight: 400;
   text-align: center;
   animation: card-in-centered 0.8s ease both;
@@ -198,25 +198,25 @@ body {
 }
 
 .zone-label__name {
-  font-size: 36px;
+  font-size: 30px;
   font-weight: 700;
   letter-spacing: 0.22em;
-  color: var(--ink-dim);
+  color: rgba(141, 151, 180, 0.85);
 }
 
 .zone-label__sub {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 400;
-  color: rgba(141, 151, 180, 0.75);
+  color: rgba(141, 151, 180, 0.6);
 }
 
 .hud-legend {
   position: absolute;
-  top: 48px;
+  top: 44px;
   right: 56px;
   display: flex;
-  gap: 36px;
-  font-size: 30px;
+  gap: 30px;
+  font-size: 26px;
   font-weight: 500;
 }
 
@@ -239,8 +239,8 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 30px;
-  padding: 26px 34px;
+  gap: 26px;
+  padding: 22px 28px;
   background: var(--panel);
   border: 2px solid var(--panel-border);
   border-radius: 26px;
@@ -256,14 +256,14 @@ body {
 }
 
 .hud-panel__title {
-  font-size: 38px;
+  font-size: 30px;
   font-weight: 700;
   letter-spacing: 0.03em;
 }
 
 .draw-pad {
-  width: 330px;
-  height: 330px;
+  width: 290px;
+  height: 290px;
   border-radius: 18px;
   border: 2px solid rgba(120, 160, 255, 0.45);
   background: #000;
@@ -278,10 +278,10 @@ body {
 
 .hud-panel__clear {
   font-family: inherit;
-  font-size: 30px;
+  font-size: 25px;
   font-weight: 500;
   color: var(--ink);
-  padding: 12px 44px;
+  padding: 9px 36px;
   background: rgba(50, 70, 130, 0.45);
   border: 2px solid var(--panel-border);
   border-radius: 999px;
@@ -298,7 +298,7 @@ body {
 }
 
 .hud-panel__try {
-  font-size: 24px;
+  font-size: 20px;
   color: var(--ink-dim);
 }
 
@@ -327,8 +327,8 @@ body {
 
 .sample-strip__thumb {
   display: block;
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   image-rendering: pixelated;
   border-radius: 6px;
 }
@@ -339,20 +339,20 @@ body {
   /* Bottom-center band, clear of both the draw panel (left) and the 3D
      output column (right edge). */
   position: absolute;
-  right: 720px;
+  right: 760px;
   bottom: 44px;
-  width: 560px;
+  width: 480px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   pointer-events: none;
 }
 
 .output-bars {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 22px 28px;
+  gap: 6px;
+  padding: 18px 24px;
   background: var(--panel);
   border: 2px solid var(--panel-border);
   border-radius: 22px;
@@ -361,10 +361,10 @@ body {
 
 .output-bar {
   display: grid;
-  grid-template-columns: 40px 1fr 84px;
+  grid-template-columns: 34px 1fr 72px;
   align-items: center;
-  gap: 14px;
-  font-size: 26px;
+  gap: 12px;
+  font-size: 22px;
   font-weight: 500;
 }
 
@@ -380,7 +380,7 @@ body {
 }
 
 .output-bar__track {
-  height: 18px;
+  height: 14px;
   border-radius: 999px;
   background: rgba(40, 52, 96, 0.55);
   overflow: hidden;
@@ -405,12 +405,12 @@ body {
 }
 
 .hud-verdict {
-  padding: 20px 34px;
+  padding: 16px 30px;
   background: var(--panel);
   border: 2px solid var(--panel-border);
   border-radius: 22px;
   box-shadow: var(--glow);
-  font-size: 32px;
+  font-size: 27px;
   font-weight: 500;
   text-align: center;
   animation: card-in 0.5s ease both;
@@ -418,10 +418,10 @@ body {
 
 .hud-verdict--attract {
   position: absolute;
-  top: 196px;
+  top: 164px;
   left: 64px;
   white-space: nowrap;
-  font-size: 32px;
+  font-size: 27px;
   animation: card-in 0.5s ease both;
   transform: none;
 }

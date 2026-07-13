@@ -29,10 +29,10 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
 
 /** Input plane brightness: idle glow → quick bloom-up with a little overshoot. */
 export function inputRamp(t: number): number {
-  if (t < 0) return 1;
+  if (t < 0) return 0.9;
   const rise = smoothstep(0, 0.3, t);
-  const overshoot = 0.18 * Math.sin(Math.PI * clamp01(t / 0.6)) * rise;
-  return 0.6 + 0.4 * rise + overshoot;
+  const overshoot = 0.12 * Math.sin(Math.PI * clamp01(t / 0.6)) * rise;
+  return 0.55 + 0.35 * rise + overshoot;
 }
 
 /** Per-neuron reveal stagger cascades down the column. */

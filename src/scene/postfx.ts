@@ -11,7 +11,8 @@ export interface PostFx {
   dispose(): void;
 }
 
-export const BLOOM_BASE_STRENGTH = 0.85;
+/** Kept modest: on a 2736px-wide wall a strong bloom is physically blinding. */
+export const BLOOM_BASE_STRENGTH = 0.55;
 
 /**
  * HDR render → bloom → tone map/sRGB. The wall is 2736×1216 (~3.3 MP);
@@ -38,7 +39,7 @@ export function createPostFx(
     new THREE.Vector2(width / bloomScale, height / bloomScale),
     BLOOM_BASE_STRENGTH,
     0.4,
-    0.25
+    0.3
   );
   composer.addPass(bloom);
   composer.addPass(new OutputPass());

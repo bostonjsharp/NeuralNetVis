@@ -92,10 +92,10 @@ export function createScene(
           // Perceptual curve: keep weak activations visibly dimmer than
           // strong ones instead of letting bloom crush everything to white.
           const level = Math.pow(normalized[layer][i], 1.6);
-          brightness += reveal * level * 1.45;
+          brightness += reveal * level * 1.05;
           scale = neuronPop(tSinceFire, layer, i, count) * (1 + 0.22 * level * reveal);
           if (layer === 2 && i === fireResult.argmax) {
-            brightness += 0.65 * flareEnv;
+            brightness += 0.4 * flareEnv;
             scale += 0.3 * flareEnv;
             warmth = Math.max(flareEnv, 0.4 * reveal * level);
           }
@@ -131,7 +131,7 @@ export function createScene(
     const outputReveal = fireResult ? neuronReveal(tSinceFire, 2, 0, 1) : 0;
     glyphs.update(fireResult ? fireResult.probs : null, Math.max(outputReveal, fireResult ? 0.35 : 0.2), fireResult?.argmax ?? 0, flareEnv);
     flare.update(flareEnv, camera);
-    post.bloom.strength = BLOOM_BASE_STRENGTH + 0.18 * flareEnv;
+    post.bloom.strength = BLOOM_BASE_STRENGTH + 0.12 * flareEnv;
 
     post.render();
   }

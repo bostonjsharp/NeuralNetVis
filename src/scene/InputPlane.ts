@@ -43,9 +43,9 @@ export class InputPlane {
         const v = 0.06 + 0.94 * Math.pow(pixels[row * GRID + col], 0.8);
         // Peak stays below bloom saturation so the digit's shape survives
         // the glow instead of dissolving into a white blob.
-        const r = 8 + 140 * v;
-        const g = 12 + 162 * v;
-        const b = 35 + 172 * v;
+        const r = 8 + 118 * v;
+        const g = 12 + 138 * v;
+        const b = 35 + 150 * v;
         for (let cy = 0; cy < CELL; cy++) {
           for (let cx = 0; cx < CELL; cx++) {
             const seam = cy === CELL - 1 || cx === CELL - 1 ? 0.3 : 1;

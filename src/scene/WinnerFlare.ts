@@ -50,7 +50,7 @@ export class WinnerFlare {
     this.mesh.quaternion.copy(camera.quaternion);
     const scale = 1.2 + 2.6 * (1 - Math.pow(1 - envelope, 2));
     this.mesh.scale.setScalar(scale);
-    this.material.opacity = 0.5 * envelope;
+    this.material.opacity = 0.35 * envelope;
   }
 
   dispose(): void {

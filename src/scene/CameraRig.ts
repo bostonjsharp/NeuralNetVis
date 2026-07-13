@@ -19,7 +19,7 @@ export class CameraRig {
   private readonly smoothedTarget = new THREE.Vector3(0, 0, 0);
   // Framed so the network floats in the wall's upper band, clear of the
   // HUD panels along the bottom edge.
-  private readonly interactivePosition = new THREE.Vector3(-2, 0.6, 30.5);
+  private readonly interactivePosition = new THREE.Vector3(-2, 0.6, 32.5);
   private readonly interactiveTarget = new THREE.Vector3(-2, -1.4, 0);
 
   constructor(private readonly camera: THREE.PerspectiveCamera) {
