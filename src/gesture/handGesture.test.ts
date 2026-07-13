@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyHand,
+  forearmsCrossed,
   isCloseEnough,
   isRaised,
   PadMapper,
   PALM,
+  pickPrimaryHand,
+  POSE,
   PoseStabilizer,
+  segmentsIntersect,
   wristsClose,
   type Landmark,
+  type PoseLandmark,
 } from "./handGesture";
 
 /** Synthetic 21-landmark hand: wrist at origin, fingers along -y. */
@@ -68,6 +73,77 @@ describe("distance and raise gates", () => {
   it("wristsClose detects crossed forearms", () => {
     expect(wristsClose({ x: 0.45, y: 0.5 }, { x: 0.55, y: 0.5 })).toBe(true);
     expect(wristsClose({ x: 0.2, y: 0.5 }, { x: 0.8, y: 0.5 })).toBe(false);
+  });
+});
+
+describe("pickPrimaryHand", () => {
+  it("picks the lifted (highest) hand on first acquisition", () => {
+    const palms = [
+      { x: 0.3, y: 0.7 },
+      { x: 0.7, y: 0.3 },
+    ];
+    expect(pickPrimaryHand(palms, null)).toBe(1);
+  });
+
+  it("sticks to the hand nearest the pen's last position", () => {
+    const last = { x: 0.3, y: 0.7 };
+    const palms = [
+      { x: 0.7, y: 0.3 }, // a second hand higher in frame
+      { x: 0.32, y: 0.69 }, // the pen hand, barely moved
+    ];
+    expect(pickPrimaryHand(palms, last)).toBe(1);
+  });
+});
+
+describe("forearm ✕ detection", () => {
+  it("segmentsIntersect finds a true crossing", () => {
+    expect(
+      segmentsIntersect({ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: 1, y: 0 })
+    ).toBe(true);
+    expect(
+      segmentsIntersect({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 })
+    ).toBe(false);
+  });
+
+  function poseWith(forearms: Record<number, PoseLandmark>): PoseLandmark[] {
+    const pose: PoseLandmark[] = Array.from({ length: 33 }, () => ({
+      x: 0,
+      y: 0,
+      visibility: 1,
+    }));
+    for (const [index, lm] of Object.entries(forearms)) pose[Number(index)] = lm;
+    return pose;
+  }
+
+  it("detects crossed forearms", () => {
+    // Left forearm ╲, right forearm ╱ — crossing mid-chest
+    const pose = poseWith({
+      [POSE.leftElbow]: { x: 0.6, y: 0.6, visibility: 1 },
+      [POSE.leftWrist]: { x: 0.4, y: 0.4, visibility: 1 },
+      [POSE.rightElbow]: { x: 0.4, y: 0.6, visibility: 1 },
+      [POSE.rightWrist]: { x: 0.6, y: 0.4, visibility: 1 },
+    });
+    expect(forearmsCrossed(pose)).toBe(true);
+  });
+
+  it("arms merely parallel do not cross", () => {
+    const pose = poseWith({
+      [POSE.leftElbow]: { x: 0.6, y: 0.6, visibility: 1 },
+      [POSE.leftWrist]: { x: 0.6, y: 0.4, visibility: 1 },
+      [POSE.rightElbow]: { x: 0.4, y: 0.6, visibility: 1 },
+      [POSE.rightWrist]: { x: 0.4, y: 0.4, visibility: 1 },
+    });
+    expect(forearmsCrossed(pose)).toBe(false);
+  });
+
+  it("ignores low-visibility (occluded) arms", () => {
+    const pose = poseWith({
+      [POSE.leftElbow]: { x: 0.6, y: 0.6, visibility: 0.2 },
+      [POSE.leftWrist]: { x: 0.4, y: 0.4, visibility: 1 },
+      [POSE.rightElbow]: { x: 0.4, y: 0.6, visibility: 1 },
+      [POSE.rightWrist]: { x: 0.6, y: 0.4, visibility: 1 },
+    });
+    expect(forearmsCrossed(pose)).toBe(false);
   });
 });
 

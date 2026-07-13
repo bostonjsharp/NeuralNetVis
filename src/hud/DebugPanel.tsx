@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { CROSS_DISTANCE, RAISE_LINE, WRIST, type HandPose } from "../gesture/handGesture";
+import { RAISE_LINE, WRIST, type HandPose } from "../gesture/handGesture";
 import type { HandDebugFrame } from "../gesture/handTracker";
 
 /** MediaPipe hand skeleton edges, for drawing. */
@@ -72,10 +72,28 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
       ctx.fillText("raise line — hold a hand above this", 10, RAISE_LINE * VIEW_H - 6);
 
       if (!frame) return;
-      for (const hand of frame.hands) {
+
+      // Forearms from the body-pose model — the long-range ✕ signal
+      if (frame.forearms) {
+        const f = frame.forearms;
+        ctx.strokeStyle = f.crossed ? "#7dff9a" : "rgba(255, 214, 90, 0.85)";
+        ctx.lineWidth = 4;
+        for (const [elbow, wristPoint] of [
+          [f.leftElbow, f.leftWrist],
+          [f.rightElbow, f.rightWrist],
+        ] as const) {
+          ctx.beginPath();
+          ctx.moveTo(mx(elbow.x), elbow.y * VIEW_H);
+          ctx.lineTo(mx(wristPoint.x), wristPoint.y * VIEW_H);
+          ctx.stroke();
+        }
+      }
+
+      for (let i = 0; i < frame.hands.length; i++) {
+        const hand = frame.hands[i];
         const color = hand.closeEnough ? POSE_COLOR[hand.rawPose] : "#e5484d";
         ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = i === frame.primaryIndex ? 3.5 : 2;
         for (const [a, b] of BONES) {
           ctx.beginPath();
           ctx.moveTo(mx(hand.landmarks[a].x), hand.landmarks[a].y * VIEW_H);
@@ -89,8 +107,9 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
           ctx.fill();
         }
         const wrist = hand.landmarks[WRIST];
+        const penTag = i === frame.primaryIndex ? "PEN · " : "";
         ctx.fillText(
-          `${hand.closeEnough ? hand.rawPose : "too far"} · span ${hand.span.toFixed(3)}`,
+          `${penTag}${hand.closeEnough ? hand.rawPose : "too far"} · span ${hand.span.toFixed(3)}`,
           mx(wrist.x) + 8,
           wrist.y * VIEW_H + 16
         );
@@ -109,7 +128,7 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
       const s = frame.state;
       status.textContent = [
         `hands: ${frame.hands.length}`,
-        `crossed(✕): ${frame.crossed} (wrists < ${CROSS_DISTANCE})`,
+        `✕: ${frame.crossed}${frame.forearms ? ` (arms ${frame.forearms.crossed ? "crossed" : "apart"})` : " (no body pose)"}`,
         s
           ? `emitted: ${s.present ? `${s.pose}${s.raised ? " · raised" : ""} @ ${s.x.toFixed(2)},${s.y.toFixed(2)}` : "absent"}`
           : "emitted: —",

@@ -1,16 +1,20 @@
-import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
+import { FilesetResolver, HandLandmarker, PoseLandmarker } from "@mediapipe/tasks-vision";
 import {
   classifyHand,
+  forearmsCrossed,
   handSpan,
   isCloseEnough,
   isRaised,
   PadMapper,
   PALM,
+  pickPrimaryHand,
+  POSE,
   PoseStabilizer,
   WRIST,
   wristsClose,
   type HandPose,
   type Landmark,
+  type PoseLandmark,
 } from "./handGesture";
 
 export interface GestureState {
@@ -42,6 +46,16 @@ export interface HandDebugFrame {
     closeEnough: boolean;
     rawPose: HandPose;
   }[];
+  /** Which entry in `hands` is the pen hand (-1 when none). */
+  primaryIndex: number;
+  /** Forearm segments from the body-pose model, when a body is visible. */
+  forearms: {
+    leftElbow: Landmark;
+    leftWrist: Landmark;
+    rightElbow: Landmark;
+    rightWrist: Landmark;
+    crossed: boolean;
+  } | null;
   crossed: boolean;
   /** Last state actually emitted to the app. */
   state: GestureState | null;
@@ -82,6 +96,19 @@ export async function startHandTracking(
     minHandPresenceConfidence: 0.35,
     minTrackingConfidence: 0.35,
   });
+  // Body pose reads at far greater range than hands; it carries the ✕
+  // detection (forearm segments crossing). Optional — hands-only if the
+  // model asset is missing.
+  let poseLandmarker: PoseLandmarker | null = null;
+  try {
+    poseLandmarker = await PoseLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: "models/pose_landmarker_lite.task", delegate: "GPU" },
+      runningMode: "VIDEO",
+      numPoses: 1,
+    });
+  } catch (err) {
+    console.warn("pose model unavailable — ✕ falls back to two-hand wrist distance:", err);
+  }
   debug?.attachVideo(video);
 
   const stabilizer = new PoseStabilizer();
@@ -91,6 +118,7 @@ export async function startHandTracking(
   let smoothSpan = 0;
   let hadHand = false;
   let missedFrames = 0;
+  let lastPrimaryPalm: Landmark | null = null;
   let raf = 0;
   let lastVideoTime = -1;
   let disposed = false;
@@ -106,12 +134,27 @@ export async function startHandTracking(
     raf = requestAnimationFrame(loop);
     if (video.currentTime === lastVideoTime) return; // no new camera frame yet
     lastVideoTime = video.currentTime;
-    const result = landmarker.detectForVideo(video, performance.now());
+    const now = performance.now();
+    const result = landmarker.detectForVideo(video, now);
     const allHands = result.landmarks ?? [];
     // Hands too small in frame are far beyond the visitor zone — ignore them
     const hands = allHands.filter(isCloseEnough);
-    const crossed = hands.length >= 2 && wristsClose(hands[0][WRIST], hands[1][WRIST]);
+
+    // ✕ detection: forearm segments crossing (body pose, long range),
+    // with two-hands-wrists-together as the fallback signal
+    let bodyPose: PoseLandmark[] | undefined;
+    if (poseLandmarker) {
+      bodyPose = poseLandmarker.detectForVideo(video, now).landmarks?.[0];
+    }
+    const poseCrossed = bodyPose ? forearmsCrossed(bodyPose) : false;
+    const crossed =
+      poseCrossed || (hands.length >= 2 && wristsClose(hands[0][WRIST], hands[1][WRIST]));
+
+    const primaryIndex =
+      hands.length > 0 ? pickPrimaryHand(hands.map((h) => h[PALM]), lastPrimaryPalm) : -1;
+
     if (debug) {
+      const primaryLandmarks = primaryIndex >= 0 ? hands[primaryIndex] : null;
       debug.onFrame({
         hands: allHands.map((landmarks) => ({
           landmarks,
@@ -119,6 +162,16 @@ export async function startHandTracking(
           closeEnough: isCloseEnough(landmarks),
           rawPose: classifyHand(landmarks),
         })),
+        primaryIndex: primaryLandmarks ? allHands.indexOf(primaryLandmarks) : -1,
+        forearms: bodyPose
+          ? {
+              leftElbow: bodyPose[POSE.leftElbow],
+              leftWrist: bodyPose[POSE.leftWrist],
+              rightElbow: bodyPose[POSE.rightElbow],
+              rightWrist: bodyPose[POSE.rightWrist],
+              crossed: poseCrossed,
+            }
+          : null,
         crossed,
         state: lastEmitted,
       });
@@ -128,6 +181,7 @@ export async function startHandTracking(
         hadHand = false;
         stabilizer.reset();
         mapper.reset();
+        lastPrimaryPalm = null;
         emit({
           present: false,
           x: smoothX,
@@ -140,7 +194,8 @@ export async function startHandTracking(
       return;
     }
     missedFrames = 0;
-    const primary = hands[0];
+    const primary = hands[primaryIndex];
+    lastPrimaryPalm = { x: primary[PALM].x, y: primary[PALM].y };
     // Smooth the span so a single misread frame doesn't warp the mapper box
     const span = handSpan(primary);
     smoothSpan = smoothSpan === 0 ? span : smoothSpan + (span - smoothSpan) * 0.1;
@@ -163,6 +218,7 @@ export async function startHandTracking(
     disposed = true;
     cancelAnimationFrame(raf);
     landmarker.close();
+    poseLandmarker?.close();
     for (const track of stream.getTracks()) track.stop();
   };
 }
