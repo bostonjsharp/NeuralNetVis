@@ -180,11 +180,11 @@ export default function App() {
       const poseChanged = g.pose !== prevPose;
       prevPose = g.pose;
       if (mode === "attract") {
-        // A hand held up briefly (~0.7s of frames) or a fist wakes the wall —
-        // brief enough to feel instant, long enough that a passerby's hand
-        // flashing through the camera doesn't yank the attract loop.
-        attractPresence++;
-        if (g.pose === "fist" || attractPresence >= 20) {
+        // Exaggerated wake gesture for a camera 2+ meters away: an OPEN
+        // hand raised HIGH, held ~1.2s. A fist, a hand at waist height, or
+        // a passerby's hand crossing the frame never wakes the wall.
+        attractPresence = g.pose === "open" && g.raised ? attractPresence + 1 : 0;
+        if (attractPresence >= 35) {
           attractPresence = 0;
           dispatch({ type: "userActive" });
         }

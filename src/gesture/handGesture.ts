@@ -22,20 +22,58 @@ const FINGERS: readonly [number, number][] = [
 const WRIST = 0;
 
 /**
- * A finger is extended when its tip is farther from the wrist than its
- * middle joint. ≤1 extended reads as a fist, ≥3 as open, exactly
- * index+middle (✌️) is the clear gesture; anything else is ambiguous
- * (mid-curl) and callers keep their previous state.
+ * Deliberately strict margins for a camera 2+ meters away: a finger only
+ * counts as EXTENDED when its tip is clearly past its middle joint
+ * (fully straightened), and only as FOLDED when clearly curled back.
+ * Half-open hands land in neither bucket, so casual poses read as
+ * "unknown" and the stabilizer holds the previous state — visitors must
+ * really clench or really splay.
  */
+const EXTENDED_RATIO = 1.25;
+const FOLDED_RATIO = 1.0;
+
 export function classifyHand(landmarks: Landmark[]): HandPose {
   const wrist = landmarks[WRIST];
   const dist = (a: Landmark) => Math.hypot(a.x - wrist.x, a.y - wrist.y);
-  const extended = FINGERS.map(([pip, tip]) => dist(landmarks[tip]) > dist(landmarks[pip]));
-  const count = extended.filter(Boolean).length;
-  if (count === 2 && extended[0] && extended[1]) return "two";
-  if (count <= 1) return "fist";
-  if (count >= 3) return "open";
+  let extendedCount = 0;
+  let foldedCount = 0;
+  const extended: boolean[] = [];
+  const folded: boolean[] = [];
+  for (const [pip, tip] of FINGERS) {
+    const ratio = dist(landmarks[tip]) / Math.max(dist(landmarks[pip]), 1e-6);
+    extended.push(ratio > EXTENDED_RATIO);
+    folded.push(ratio < FOLDED_RATIO);
+    if (ratio > EXTENDED_RATIO) extendedCount++;
+    if (ratio < FOLDED_RATIO) foldedCount++;
+  }
+  if (extended[0] && extended[1] && folded[2] && folded[3]) return "two";
+  if (foldedCount >= 3 && extendedCount === 0) return "fist";
+  if (extendedCount >= 3 && foldedCount === 0) return "open";
   return "unknown";
+}
+
+/** Palm anchor: middle-finger MCP tracks the hand's center steadily. */
+export const PALM = 9;
+
+/** A hand is "raised" when the palm sits in the top band of the camera
+ *  frame — an arm held high, not a hand at waist height. */
+const RAISE_LINE = 0.35;
+
+export function isRaised(landmarks: Landmark[]): boolean {
+  return landmarks[PALM].y < RAISE_LINE;
+}
+
+/**
+ * Wrist→palm span in normalized camera units — a proxy for how close the
+ * hand is. Visitors stand ~2m away; anything smaller is someone much
+ * farther out (or a misdetection) and is ignored entirely.
+ */
+const MIN_HAND_SPAN = 0.05;
+
+export function isCloseEnough(landmarks: Landmark[]): boolean {
+  const wrist = landmarks[WRIST];
+  const palm = landmarks[PALM];
+  return Math.hypot(palm.x - wrist.x, palm.y - wrist.y) >= MIN_HAND_SPAN;
 }
 
 /**
@@ -57,11 +95,13 @@ export function mapToPad(cameraX: number, cameraY: number): { x: number; y: numb
 }
 
 /** Frames a pose flip must hold before it's reported. ✌️ (clear) needs a
- *  deliberate hold because fingers pass through two-extended mid-curl. */
+ *  deliberate hold because fingers pass through two-extended mid-curl;
+ *  fist/open holds are longer than strictly needed because landmarks are
+ *  noisier with the hand small in frame at 2m. */
 const DEFAULT_HOLD_FRAMES: Record<Exclude<HandPose, "unknown">, number> = {
-  fist: 3,
-  open: 3,
-  two: 12,
+  fist: 5,
+  open: 5,
+  two: 15,
 };
 
 /**

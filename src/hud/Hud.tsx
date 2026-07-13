@@ -50,7 +50,7 @@ export default function Hud({
           )}
           <div className="hud-hint">
             {gestureActive
-              ? "Raise your hand ✋ — or move the mouse — to try it yourself"
+              ? "Raise your open hand ✋ high and hold it — or move the mouse — to try it"
               : "Move the mouse to try it yourself"}
           </div>
           <FactCards />

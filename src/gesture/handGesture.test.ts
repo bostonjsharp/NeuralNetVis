@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { classifyHand, mapToPad, PoseStabilizer, type Landmark } from "./handGesture";
+import {
+  classifyHand,
+  isCloseEnough,
+  isRaised,
+  mapToPad,
+  PALM,
+  PoseStabilizer,
+  type Landmark,
+} from "./handGesture";
 
 /** Synthetic 21-landmark hand: wrist at origin, fingers along -y. */
 function hand(tipDistance: number, pipDistance = 0.3): Landmark[] {
@@ -39,6 +47,29 @@ describe("classifyHand", () => {
     landmarks[8] = { x: 0, y: -0.1 };
     landmarks[12] = { x: 0, y: -0.1 };
     expect(classifyHand(landmarks)).toBe("unknown");
+  });
+
+  it("a half-open hand is unknown — casual poses never register", () => {
+    // Tips barely past the middle joints: neither clearly extended nor folded
+    expect(classifyHand(hand(0.33, 0.3))).toBe("unknown");
+  });
+});
+
+describe("distance and raise gates", () => {
+  it("ignores hands too small in frame (far beyond the visitor zone)", () => {
+    const landmarks = hand(0.6);
+    landmarks[PALM] = { x: 0, y: -0.02 }; // tiny wrist→palm span
+    expect(isCloseEnough(landmarks)).toBe(false);
+    landmarks[PALM] = { x: 0, y: -0.2 };
+    expect(isCloseEnough(landmarks)).toBe(true);
+  });
+
+  it("only counts a palm high in the frame as raised", () => {
+    const landmarks = hand(0.6);
+    landmarks[PALM] = { x: 0.5, y: 0.2 }; // camera y grows downward
+    expect(isRaised(landmarks)).toBe(true);
+    landmarks[PALM] = { x: 0.5, y: 0.6 };
+    expect(isRaised(landmarks)).toBe(false);
   });
 });
 

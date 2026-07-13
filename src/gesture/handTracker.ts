@@ -1,5 +1,13 @@
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
-import { classifyHand, mapToPad, PoseStabilizer, type HandPose } from "./handGesture";
+import {
+  classifyHand,
+  isCloseEnough,
+  isRaised,
+  mapToPad,
+  PALM,
+  PoseStabilizer,
+  type HandPose,
+} from "./handGesture";
 
 export interface GestureState {
   present: boolean;
@@ -8,12 +16,12 @@ export interface GestureState {
   y: number;
   /** Debounced pose: ✊ fist = pen down, ✋ open = pen lifted, ✌️ two = clear. */
   pose: Exclude<HandPose, "unknown">;
+  /** Palm held high in the camera frame (the exaggerated wake gesture). */
+  raised: boolean;
 }
 
 /** Exponential smoothing factor for the cursor (higher = snappier). */
 const SMOOTHING = 0.35;
-/** Palm anchor: middle-finger MCP tracks the hand's center steadily. */
-const PALM = 9;
 
 /**
  * Opens the webcam, runs MediaPipe HandLandmarker (assets served locally
@@ -55,11 +63,12 @@ export async function startHandTracking(
     lastVideoTime = video.currentTime;
     const result = landmarker.detectForVideo(video, performance.now());
     const landmarks = result.landmarks?.[0];
-    if (!landmarks) {
+    // A hand too small in frame is far beyond the visitor zone — ignore it
+    if (!landmarks || !isCloseEnough(landmarks)) {
       if (hadHand) {
         hadHand = false;
         stabilizer.reset();
-        onState({ present: false, x: smoothX, y: smoothY, pose: "open" });
+        onState({ present: false, x: smoothX, y: smoothY, pose: "open", raised: false });
       }
       return;
     }
@@ -74,7 +83,7 @@ export async function startHandTracking(
       smoothY += (mapped.y - smoothY) * SMOOTHING;
     }
     const pose = stabilizer.update(classifyHand(landmarks)) as Exclude<HandPose, "unknown">;
-    onState({ present: true, x: smoothX, y: smoothY, pose });
+    onState({ present: true, x: smoothX, y: smoothY, pose, raised: isRaised(landmarks) });
   };
   loop();
 
