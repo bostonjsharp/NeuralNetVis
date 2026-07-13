@@ -1,13 +1,16 @@
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 import {
   classifyHand,
+  handSpan,
   isCloseEnough,
   isRaised,
   mapToPad,
   PALM,
-  palmsClose,
   PoseStabilizer,
+  WRIST,
+  wristsClose,
   type HandPose,
+  type Landmark,
 } from "./handGesture";
 
 export interface GestureState {
@@ -31,6 +34,25 @@ const SMOOTHING = 0.35;
  *  grace a 5-second wake hold would reset on every blip. */
 const ABSENCE_GRACE_FRAMES = 14;
 
+/** Per-frame diagnostics for the dev overlay (G key / ?debug). */
+export interface HandDebugFrame {
+  hands: {
+    landmarks: Landmark[];
+    span: number;
+    closeEnough: boolean;
+    rawPose: HandPose;
+  }[];
+  crossed: boolean;
+  /** Last state actually emitted to the app. */
+  state: GestureState | null;
+}
+
+export interface HandDebugSink {
+  /** Called once with the (playing) camera video element. */
+  attachVideo(video: HTMLVideoElement): void;
+  onFrame(frame: HandDebugFrame): void;
+}
+
 /**
  * Opens the webcam, runs MediaPipe HandLandmarker (assets served locally
  * from public/), and reports a smoothed, debounced gesture state every
@@ -38,7 +60,8 @@ const ABSENCE_GRACE_FRAMES = 14;
  * treat gestures as an optional enhancement and fall back to mouse.
  */
 export async function startHandTracking(
-  onState: (state: GestureState) => void
+  onState: (state: GestureState) => void,
+  debug?: HandDebugSink
 ): Promise<() => void> {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { width: 640, height: 360, facingMode: "user" },
@@ -54,7 +77,12 @@ export async function startHandTracking(
     baseOptions: { modelAssetPath: "models/hand_landmarker.task", delegate: "GPU" },
     runningMode: "VIDEO",
     numHands: 2, // second hand only matters for the arms-crossed clear
+    // Hands are small in frame at 2m — the defaults (0.5) drop them
+    minHandDetectionConfidence: 0.35,
+    minHandPresenceConfidence: 0.35,
+    minTrackingConfidence: 0.35,
   });
+  debug?.attachVideo(video);
 
   const stabilizer = new PoseStabilizer();
   let smoothX = 0.5;
@@ -65,19 +93,39 @@ export async function startHandTracking(
   let lastVideoTime = -1;
   let disposed = false;
 
+  let lastEmitted: GestureState | null = null;
+  const emit = (state: GestureState) => {
+    lastEmitted = state;
+    onState(state);
+  };
+
   const loop = () => {
     if (disposed) return;
     raf = requestAnimationFrame(loop);
     if (video.currentTime === lastVideoTime) return; // no new camera frame yet
     lastVideoTime = video.currentTime;
     const result = landmarker.detectForVideo(video, performance.now());
+    const allHands = result.landmarks ?? [];
     // Hands too small in frame are far beyond the visitor zone — ignore them
-    const hands = (result.landmarks ?? []).filter(isCloseEnough);
+    const hands = allHands.filter(isCloseEnough);
+    const crossed = hands.length >= 2 && wristsClose(hands[0][WRIST], hands[1][WRIST]);
+    if (debug) {
+      debug.onFrame({
+        hands: allHands.map((landmarks) => ({
+          landmarks,
+          span: handSpan(landmarks),
+          closeEnough: isCloseEnough(landmarks),
+          rawPose: classifyHand(landmarks),
+        })),
+        crossed,
+        state: lastEmitted,
+      });
+    }
     if (hands.length === 0) {
       if (hadHand && ++missedFrames > ABSENCE_GRACE_FRAMES) {
         hadHand = false;
         stabilizer.reset();
-        onState({
+        emit({
           present: false,
           x: smoothX,
           y: smoothY,
@@ -101,8 +149,7 @@ export async function startHandTracking(
       smoothY += (mapped.y - smoothY) * SMOOTHING;
     }
     const pose = stabilizer.update(classifyHand(primary)) as Exclude<HandPose, "unknown">;
-    const crossed = hands.length >= 2 && palmsClose(hands[0][PALM], hands[1][PALM]);
-    onState({ present: true, x: smoothX, y: smoothY, pose, raised: isRaised(primary), crossed });
+    emit({ present: true, x: smoothX, y: smoothY, pose, raised: isRaised(primary), crossed });
   };
   loop();
 

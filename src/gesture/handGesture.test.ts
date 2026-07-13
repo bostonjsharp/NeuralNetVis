@@ -5,8 +5,8 @@ import {
   isRaised,
   mapToPad,
   PALM,
-  palmsClose,
   PoseStabilizer,
+  wristsClose,
   type Landmark,
 } from "./handGesture";
 
@@ -65,9 +65,9 @@ describe("distance and raise gates", () => {
     expect(isRaised(landmarks)).toBe(false);
   });
 
-  it("palmsClose detects arms crossed / hands together", () => {
-    expect(palmsClose({ x: 0.45, y: 0.5 }, { x: 0.55, y: 0.5 })).toBe(true);
-    expect(palmsClose({ x: 0.2, y: 0.5 }, { x: 0.8, y: 0.5 })).toBe(false);
+  it("wristsClose detects crossed forearms", () => {
+    expect(wristsClose({ x: 0.45, y: 0.5 }, { x: 0.55, y: 0.5 })).toBe(true);
+    expect(wristsClose({ x: 0.2, y: 0.5 }, { x: 0.8, y: 0.5 })).toBe(false);
   });
 });
 

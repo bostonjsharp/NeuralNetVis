@@ -19,7 +19,7 @@ const FINGERS: readonly [number, number][] = [
   [14, 16], // ring
   [18, 20], // pinky
 ];
-const WRIST = 0;
+export const WRIST = 0;
 
 /**
  * Deliberately strict margins for a camera 2+ meters away: a finger only
@@ -53,7 +53,7 @@ export const PALM = 9;
 /** A hand is "raised" when the palm sits in the upper part of the camera
  *  frame — an arm held up, not a hand at waist height. Any pose counts;
  *  at 2m the 5-second hold is the false-positive filter, not the pose. */
-const RAISE_LINE = 0.45;
+export const RAISE_LINE = 0.45;
 
 export function isRaised(landmarks: Landmark[]): boolean {
   return landmarks[PALM].y < RAISE_LINE;
@@ -65,20 +65,24 @@ export function isRaised(landmarks: Landmark[]): boolean {
  * webcam frame; anything below this is someone much farther out (or a
  * misdetection) and is ignored entirely.
  */
-const MIN_HAND_SPAN = 0.022;
+export const MIN_HAND_SPAN = 0.022;
 
-export function isCloseEnough(landmarks: Landmark[]): boolean {
+export function handSpan(landmarks: Landmark[]): number {
   const wrist = landmarks[WRIST];
   const palm = landmarks[PALM];
-  return Math.hypot(palm.x - wrist.x, palm.y - wrist.y) >= MIN_HAND_SPAN;
+  return Math.hypot(palm.x - wrist.x, palm.y - wrist.y);
 }
 
-/** Two palms near each other — arms crossed in an ✕ (or hands brought
- *  together) — the arm-scale clear gesture, readable at any distance the
- *  hands themselves are detectable. */
-const CROSS_DISTANCE = 0.22;
+export function isCloseEnough(landmarks: Landmark[]): boolean {
+  return handSpan(landmarks) >= MIN_HAND_SPAN;
+}
 
-export function palmsClose(a: Landmark, b: Landmark): boolean {
+/** Two WRISTS near each other — arms crossed in an ✕. Wrists are the
+ *  right anchor: when forearms cross, the wrists touch while the palms
+ *  splay far apart in opposite directions. */
+export const CROSS_DISTANCE = 0.25;
+
+export function wristsClose(a: Landmark, b: Landmark): boolean {
   return Math.hypot(a.x - b.x, a.y - b.y) < CROSS_DISTANCE;
 }
 

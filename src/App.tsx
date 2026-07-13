@@ -14,6 +14,7 @@ import { initialState, reduce, type InferenceSummary } from "./app/state";
 import Hud from "./hud/Hud";
 import Stage from "./hud/Stage";
 import { startHandTracking, type GestureState } from "./gesture/handTracker";
+import DebugPanel, { type DebugData } from "./hud/DebugPanel";
 import type { DrawPadHandle } from "./hud/DrawPad";
 import { forwardPass, type ForwardResult } from "./nn/inference";
 import { downsampleTo28, preprocessDrawing } from "./nn/preprocess";
@@ -50,6 +51,10 @@ export default function App() {
   const wakeProgressRef = useRef(0);
   const padRef = useRef<DrawPadHandle>(null);
   const gestureDrawingRef = useRef(false);
+  const [debugOpen, setDebugOpen] = useState(
+    () => new URLSearchParams(window.location.search).has("debug")
+  );
+  const debugDataRef = useRef<DebugData>({ video: null, frame: null });
   const barsTimer = useRef(0);
   const cinematicTimer = useRef(0);
   const autoFireTimer = useRef(0);
@@ -251,7 +256,14 @@ export default function App() {
     // the camera at load, keep retrying instead of giving up forever.
     let retryTimer = 0;
     const attempt = () => {
-      startHandTracking(onGesture)
+      startHandTracking(onGesture, {
+      attachVideo: (video) => {
+        debugDataRef.current.video = video;
+      },
+      onFrame: (frame) => {
+        debugDataRef.current.frame = frame;
+      },
+    })
         .then((stop) => {
           if (cancelled) stop();
           else {
@@ -317,6 +329,15 @@ export default function App() {
     fireInteractive(decodeSamplePixels(sample.pixels), "sample", sample.label);
   };
 
+  // Dev-only: G toggles the gesture debug overlay (also via ?debug)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "g" || e.key === "G") setDebugOpen((open) => !open);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const handleClear = () => {
     if (stateRef.current.mode === "infer") return;
     window.clearTimeout(autoFireTimer.current);
@@ -348,6 +369,7 @@ export default function App() {
         onSample={handleSample}
         onClear={handleClear}
       />
+      {debugOpen && <DebugPanel dataRef={debugDataRef} />}
     </Stage>
   );
 }

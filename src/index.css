@@ -349,6 +349,49 @@ body {
   white-space: nowrap;
 }
 
+/* ---- gesture debug overlay (dev: G key or ?debug) ---- */
+
+.debug-panel {
+  position: absolute;
+  top: 150px;
+  right: 44px;
+  width: 560px;
+  border: 2px solid rgba(125, 255, 154, 0.5);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(5, 8, 20, 0.9);
+  z-index: 10;
+}
+
+.debug-panel__view {
+  position: relative;
+  width: 560px;
+  height: 315px;
+}
+
+.debug-panel__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* selfie view */
+}
+
+.debug-panel__overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.debug-panel__status {
+  padding: 10px 14px;
+  font-size: 17px;
+  font-family: Consolas, monospace;
+  color: #7dff9a;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
 .hud-panel__clear {
   font-family: inherit;
   font-size: 25px;
