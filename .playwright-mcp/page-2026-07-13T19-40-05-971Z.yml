@@ -1,0 +1,63 @@
+- generic [ref=e4]:
+  - generic:
+    - generic:
+      - generic: INPUT
+      - generic: your drawing — 784 pixels
+    - generic:
+      - generic: HIDDEN LAYERS
+      - generic: 16 + 16 neurons finding patterns
+    - generic:
+      - generic: OUTPUT
+      - generic: 10 digits — brightest wins
+    - generic:
+      - generic: ━ excites
+      - generic: ━ inhibits
+    - generic [ref=e6]:
+      - generic [ref=e7]: Draw a digit 0–9
+      - generic "drawing pad" [ref=e8]
+      - button "Clear" [ref=e9] [cursor=pointer]
+      - generic [ref=e10]: "…or try a real handwritten digit:"
+      - generic [ref=e11]:
+        - button "try a handwritten 0" [ref=e12] [cursor=pointer]
+        - button "try a handwritten 1" [ref=e14] [cursor=pointer]
+        - button "try a handwritten 2" [ref=e16] [cursor=pointer]
+        - button "try a handwritten 3" [ref=e18] [cursor=pointer]
+        - button "try a handwritten 4" [ref=e20] [cursor=pointer]
+        - button "try a handwritten 5" [ref=e22] [cursor=pointer]
+        - button "try a handwritten 6" [ref=e24] [cursor=pointer]
+        - button "try a handwritten 7" [ref=e26] [cursor=pointer]
+        - button "try a handwritten 8" [ref=e28] [cursor=pointer]
+        - button "try a handwritten 9" [ref=e30] [cursor=pointer]
+    - complementary:
+      - generic:
+        - generic:
+          - generic: "0"
+          - generic: 0%
+        - generic:
+          - generic: "1"
+          - generic: 0%
+        - generic:
+          - generic: "2"
+          - generic: 0%
+        - generic:
+          - generic: "3"
+          - generic: 0%
+        - generic:
+          - generic: "4"
+          - generic: 0%
+        - generic:
+          - generic: "5"
+          - generic: 0%
+        - generic:
+          - generic: "6"
+          - generic: 0%
+        - generic:
+          - generic: "7"
+          - generic: 0%
+        - generic:
+          - generic: "8"
+          - generic: 100%
+        - generic:
+          - generic: "9"
+          - generic: 0%
+      - generic: Shown a handwritten 8 — got it, 100% sure

@@ -1,0 +1,438 @@
+/* Authored at the wall's exact 2736×1216 canvas; Stage scales to fit dev
+   viewports. Type sizes assume viewing from across a room. */
+
+:root {
+  --bg: #050510;
+  --ink: #e8edf8;
+  --ink-dim: #8d97b4;
+  --warm: #ffa03d;
+  --cool: #4dbfff;
+  --panel: rgba(10, 14, 32, 0.78);
+  --panel-border: rgba(96, 140, 220, 0.35);
+  --glow: 0 0 24px rgba(80, 140, 255, 0.25);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  color: var(--ink);
+  user-select: none;
+}
+
+#root {
+  height: 100%;
+}
+
+/* ---- fixed stage, scaled to fit (ported from LifeOfLLM) ---- */
+
+.stage-viewport {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.stage {
+  /* Centered by anchoring the layout box's center to the viewport center
+     (left/top 50% + negative half-size margins), then scaling about that
+     same center. Grid/flex centering can't do this: an item larger than
+     its container overflows toward the end edge, so the pre-scale layout
+     box — and everything scaled around it — lands off-center. */
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2736px;
+  height: 1216px;
+  margin-left: -1368px;
+  margin-top: -608px;
+  transform-origin: center center;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.scene-canvas {
+  position: absolute;
+  inset: 0;
+  width: 2736px;
+  height: 1216px;
+}
+
+.vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 75% 70% at 50% 46%,
+    transparent 55%,
+    rgba(2, 3, 10, 0.55) 100%
+  );
+}
+
+/* ---- HUD chrome ---- */
+
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hud button {
+  pointer-events: auto;
+}
+
+.hud-title {
+  /* Top-left, cinematic-poster style — the center-top belongs to the
+     HIDDEN LAYERS zone label and the network itself. */
+  position: absolute;
+  top: 40px;
+  left: 64px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.hud-title h1 {
+  margin: 0;
+  font-size: 72px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-shadow: 0 0 40px rgba(90, 150, 255, 0.55);
+}
+
+.hud-title p {
+  margin: 8px 0 0;
+  font-size: 30px;
+  font-weight: 400;
+  color: var(--ink-dim);
+}
+
+.hud-hint {
+  position: absolute;
+  bottom: 170px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 40px;
+  font-weight: 500;
+  color: var(--cool);
+  animation: hint-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes hint-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.fact-card {
+  position: absolute;
+  bottom: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 1500px;
+  padding: 26px 54px;
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 22px;
+  box-shadow: var(--glow);
+  font-size: 38px;
+  font-weight: 400;
+  text-align: center;
+  animation: card-in-centered 0.8s ease both;
+}
+
+/* For elements centered with translateX(-50%) — the animation must carry
+   the centering, since an animation's transform replaces the property. */
+@keyframes card-in-centered {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 18px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ---- zone labels & legend ---- */
+
+.zone-label {
+  position: absolute;
+  top: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.zone-label--input {
+  left: 7%;
+}
+
+/* In attract mode the title/verdict own the top-left; keep INPUT clear. */
+.hud--attract .zone-label--input {
+  top: 320px;
+  left: 3%;
+}
+
+.zone-label--hidden {
+  left: 50%;
+  transform: translateX(-50%);
+  top: 130px;
+}
+
+.zone-label--output {
+  right: 6%;
+  top: 130px;
+}
+
+.zone-label__name {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--ink-dim);
+}
+
+.zone-label__sub {
+  font-size: 26px;
+  font-weight: 400;
+  color: rgba(141, 151, 180, 0.75);
+}
+
+.hud-legend {
+  position: absolute;
+  top: 48px;
+  right: 56px;
+  display: flex;
+  gap: 36px;
+  font-size: 30px;
+  font-weight: 500;
+}
+
+.hud-legend__warm {
+  color: var(--warm);
+  text-shadow: 0 0 18px rgba(255, 160, 61, 0.6);
+}
+
+.hud-legend__cool {
+  color: var(--cool);
+  text-shadow: 0 0 18px rgba(77, 191, 255, 0.6);
+}
+
+/* ---- interactive panel (bottom-left) ---- */
+
+.hud-panel {
+  position: absolute;
+  left: 56px;
+  bottom: 44px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 30px;
+  padding: 26px 34px;
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 26px;
+  box-shadow: var(--glow);
+  pointer-events: auto;
+}
+
+.hud-panel__side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.hud-panel__title {
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.draw-pad {
+  width: 330px;
+  height: 330px;
+  border-radius: 18px;
+  border: 2px solid rgba(120, 160, 255, 0.45);
+  background: #000;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.draw-pad--disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.hud-panel__clear {
+  font-family: inherit;
+  font-size: 30px;
+  font-weight: 500;
+  color: var(--ink);
+  padding: 12px 44px;
+  background: rgba(50, 70, 130, 0.45);
+  border: 2px solid var(--panel-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.hud-panel__clear:hover:not(:disabled) {
+  background: rgba(70, 100, 180, 0.6);
+}
+
+.hud-panel__clear:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.hud-panel__try {
+  font-size: 24px;
+  color: var(--ink-dim);
+}
+
+.sample-strip {
+  display: grid;
+  grid-template-columns: repeat(5, auto);
+  gap: 10px;
+}
+
+.sample-strip__button {
+  padding: 4px;
+  background: rgba(30, 42, 80, 0.6);
+  border: 2px solid rgba(96, 140, 220, 0.25);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.sample-strip__button:hover:not(:disabled) {
+  border-color: var(--cool);
+}
+
+.sample-strip__button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.sample-strip__thumb {
+  display: block;
+  width: 56px;
+  height: 56px;
+  image-rendering: pixelated;
+  border-radius: 6px;
+}
+
+/* ---- output bars (right) ---- */
+
+.hud-output {
+  /* Bottom-center band, clear of both the draw panel (left) and the 3D
+     output column (right edge). */
+  position: absolute;
+  right: 720px;
+  bottom: 44px;
+  width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  pointer-events: none;
+}
+
+.output-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 22px 28px;
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 22px;
+  box-shadow: var(--glow);
+}
+
+.output-bar {
+  display: grid;
+  grid-template-columns: 40px 1fr 84px;
+  align-items: center;
+  gap: 14px;
+  font-size: 26px;
+  font-weight: 500;
+}
+
+.output-bar__digit {
+  text-align: center;
+  color: var(--ink-dim);
+}
+
+.output-bar--winner .output-bar__digit,
+.output-bar--winner .output-bar__pct {
+  color: var(--warm);
+  text-shadow: 0 0 16px rgba(255, 160, 61, 0.7);
+}
+
+.output-bar__track {
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(40, 52, 96, 0.55);
+  overflow: hidden;
+}
+
+.output-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3d7dd8, #7fd0ff);
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.output-bar--winner .output-bar__fill {
+  background: linear-gradient(90deg, #e08a2c, #ffd27d);
+  box-shadow: 0 0 18px rgba(255, 180, 80, 0.75);
+}
+
+.output-bar__pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-verdict {
+  padding: 20px 34px;
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 22px;
+  box-shadow: var(--glow);
+  font-size: 32px;
+  font-weight: 500;
+  text-align: center;
+  animation: card-in 0.5s ease both;
+}
+
+.hud-verdict--attract {
+  position: absolute;
+  top: 196px;
+  left: 64px;
+  white-space: nowrap;
+  font-size: 32px;
+  animation: card-in 0.5s ease both;
+  transform: none;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -6,6 +6,30 @@
  * drawings classify terribly without this step.
  */
 
+/**
+ * Plain box-filter downsample to 28×28 with no recentering — the live
+ * mirror shown while a visitor is mid-stroke. The recentering snap happens
+ * visibly at fire time via `preprocessDrawing`, which is itself a nice
+ * "the network normalizes your drawing" beat.
+ */
+export function downsampleTo28(src: Float32Array, width: number, height: number): Float32Array {
+  const out = new Float32Array(28 * 28);
+  for (let dy = 0; dy < 28; dy++) {
+    const sy0 = Math.floor((dy / 28) * height);
+    const sy1 = Math.max(sy0 + 1, Math.floor(((dy + 1) / 28) * height));
+    for (let dx = 0; dx < 28; dx++) {
+      const sx0 = Math.floor((dx / 28) * width);
+      const sx1 = Math.max(sx0 + 1, Math.floor(((dx + 1) / 28) * width));
+      let sum = 0;
+      for (let sy = sy0; sy < sy1; sy++) {
+        for (let sx = sx0; sx < sx1; sx++) sum += src[sy * width + sx];
+      }
+      out[dy * 28 + dx] = Math.min(1, sum / ((sy1 - sy0) * (sx1 - sx0)));
+    }
+  }
+  return out;
+}
+
 const INK_THRESHOLD = 0.01;
 const DIGIT_SIZE = 20;
 const FIELD = 28;

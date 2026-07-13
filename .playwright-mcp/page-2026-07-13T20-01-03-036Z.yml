@@ -1,0 +1,43 @@
+- generic [ref=f7e4]:
+  - generic:
+    - generic:
+      - generic: INPUT
+      - generic: your drawing — 784 pixels
+    - generic:
+      - generic: HIDDEN LAYERS
+      - generic: 16 + 16 neurons finding patterns
+    - generic:
+      - generic: OUTPUT
+      - generic: 10 digits — brightest wins
+    - generic:
+      - generic: ━ excites
+      - generic: ━ inhibits
+    - generic [ref=f7e6]:
+      - generic "drawing pad" [ref=f7e7]
+      - generic [ref=f7e8]:
+        - generic [ref=f7e9]: Draw a digit 0–9
+        - button "Clear" [ref=f7e10] [cursor=pointer]
+        - generic [ref=f7e11]: "…or try a real handwritten digit:"
+        - generic [ref=f7e12]:
+          - button "try a handwritten 0" [ref=f7e13] [cursor=pointer]
+          - button "try a handwritten 1" [ref=f7e15] [cursor=pointer]
+          - button "try a handwritten 2" [ref=f7e17] [cursor=pointer]
+          - button "try a handwritten 3" [ref=f7e19] [cursor=pointer]
+          - button "try a handwritten 4" [ref=f7e21] [cursor=pointer]
+          - button "try a handwritten 5" [ref=f7e23] [cursor=pointer]
+          - button "try a handwritten 6" [ref=f7e25] [cursor=pointer]
+          - button "try a handwritten 7" [ref=f7e27] [cursor=pointer]
+          - button "try a handwritten 8" [ref=f7e29] [cursor=pointer]
+          - button "try a handwritten 9" [ref=f7e31] [cursor=pointer]
+    - complementary:
+      - generic:
+        - generic: "0"
+        - generic: "1"
+        - generic: "2"
+        - generic: "3"
+        - generic: "4"
+        - generic: "5"
+        - generic: "6"
+        - generic: "7"
+        - generic: "8"
+        - generic: "9"

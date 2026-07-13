@@ -1,0 +1,52 @@
+- generic [ref=f1e4]:
+  - generic:
+    - generic:
+      - generic: INPUT
+      - generic: your drawing — 784 pixels
+    - generic:
+      - generic: HIDDEN LAYERS
+      - generic: 16 + 16 neurons finding patterns
+    - generic:
+      - generic: OUTPUT
+      - generic: 10 digits — brightest wins
+    - generic:
+      - generic: ━ excites
+      - generic: ━ inhibits
+    - banner:
+      - heading "Inside a Neural Network" [level=1]
+      - paragraph: A real artificial brain — 13,002 learned connections, thinking in front of you
+    - generic: Move the mouse to try it yourself
+    - generic: Every line is a weight the network learned by studying 60,000 handwritten digits.
+    - complementary:
+      - generic:
+        - generic:
+          - generic: "0"
+          - generic: 0%
+        - generic:
+          - generic: "1"
+          - generic: 0%
+        - generic:
+          - generic: "2"
+          - generic: 0%
+        - generic:
+          - generic: "3"
+          - generic: 0%
+        - generic:
+          - generic: "4"
+          - generic: 100%
+        - generic:
+          - generic: "5"
+          - generic: 0%
+        - generic:
+          - generic: "6"
+          - generic: 0%
+        - generic:
+          - generic: "7"
+          - generic: 0%
+        - generic:
+          - generic: "8"
+          - generic: 0%
+        - generic:
+          - generic: "9"
+          - generic: 0%
+      - generic: Shown a handwritten 4 — got it, 100% sure
