@@ -30,7 +30,9 @@ export const WRIST = 0;
  * really clench or really splay.
  */
 const EXTENDED_RATIO = 1.25;
-const FOLDED_RATIO = 1.0;
+/** Generous: at 2m a clenched fist's fingers read as barely folded, and a
+ *  lost fist mid-stroke chops the drawing. */
+const FOLDED_RATIO = 1.12;
 
 export function classifyHand(landmarks: Landmark[]): HandPose {
   const wrist = landmarks[WRIST];
@@ -87,29 +89,57 @@ export function wristsClose(a: Landmark, b: Landmark): boolean {
 }
 
 /**
- * Maps a normalized camera-space hand position to normalized pad space.
- * Mirrored (webcams are selfie-view), and only the central region of the
- * camera frame is used so reaching the pad's corners doesn't require
- * stretching to the edge of the camera's view.
+ * Maps hand position to pad space RELATIVE to the hand's apparent size,
+ * so drawing needs the same comfortable physical movement at any distance
+ * from the camera. A virtual box `reach` hand-spans wide is anchored where
+ * the hand appears (cursor starts at pad center); moving within the box
+ * moves the cursor, and pushing past an edge drags the box along. X is
+ * mirrored for selfie view.
  */
-const REGION_MIN = 0.22;
-const REGION_MAX = 0.78;
+export class PadMapper {
+  private anchorX: number | null = null;
+  private anchorY = 0;
 
-export function mapToPad(cameraX: number, cameraY: number): { x: number; y: number } {
-  const span = REGION_MAX - REGION_MIN;
-  const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-  return {
-    x: clamp01((1 - cameraX - REGION_MIN) / span),
-    y: clamp01((cameraY - REGION_MIN) / span),
-  };
+  /** `reach` = hand-spans of travel to cross the whole pad. */
+  constructor(private readonly reach = 5) {}
+
+  update(palm: Landmark, span: number): { x: number; y: number } {
+    // Floor keeps the box usable if span misreads tiny for a frame
+    const width = Math.max(this.reach * span, 0.1);
+    if (this.anchorX === null) {
+      this.anchorX = palm.x;
+      this.anchorY = palm.y;
+    }
+    let ox = (palm.x - this.anchorX) / width;
+    if (ox > 0.5) {
+      this.anchorX = palm.x - 0.5 * width;
+      ox = 0.5;
+    } else if (ox < -0.5) {
+      this.anchorX = palm.x + 0.5 * width;
+      ox = -0.5;
+    }
+    let oy = (palm.y - this.anchorY) / width;
+    if (oy > 0.5) {
+      this.anchorY = palm.y - 0.5 * width;
+      oy = 0.5;
+    } else if (oy < -0.5) {
+      this.anchorY = palm.y + 0.5 * width;
+      oy = -0.5;
+    }
+    return { x: 0.5 - ox, y: 0.5 + oy };
+  }
+
+  reset(): void {
+    this.anchorX = null;
+  }
 }
 
-/** Frames a pose flip must hold before it's reported — longer than
- *  strictly needed because landmarks are noisier with the hand small in
- *  frame at 2m. */
+/** Frames a pose flip must hold before it's reported. Asymmetric: the pen
+ *  presses quickly but releases slowly, so a noisy frame or two mid-stroke
+ *  never chops the drawing. */
 const DEFAULT_HOLD_FRAMES: Record<Exclude<HandPose, "unknown">, number> = {
-  fist: 5,
-  open: 5,
+  fist: 4,
+  open: 8,
 };
 
 /**

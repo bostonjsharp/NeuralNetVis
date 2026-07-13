@@ -4,7 +4,7 @@ import {
   handSpan,
   isCloseEnough,
   isRaised,
-  mapToPad,
+  PadMapper,
   PALM,
   PoseStabilizer,
   WRIST,
@@ -32,7 +32,7 @@ const SMOOTHING = 0.35;
 /** Consecutive hand-less camera frames tolerated before reporting absence.
  *  Tracking drops out for a frame or two constantly at 2m — without this
  *  grace a 5-second wake hold would reset on every blip. */
-const ABSENCE_GRACE_FRAMES = 14;
+const ABSENCE_GRACE_FRAMES = 20;
 
 /** Per-frame diagnostics for the dev overlay (G key / ?debug). */
 export interface HandDebugFrame {
@@ -85,8 +85,10 @@ export async function startHandTracking(
   debug?.attachVideo(video);
 
   const stabilizer = new PoseStabilizer();
+  const mapper = new PadMapper();
   let smoothX = 0.5;
   let smoothY = 0.5;
+  let smoothSpan = 0;
   let hadHand = false;
   let missedFrames = 0;
   let raf = 0;
@@ -125,6 +127,7 @@ export async function startHandTracking(
       if (hadHand && ++missedFrames > ABSENCE_GRACE_FRAMES) {
         hadHand = false;
         stabilizer.reset();
+        mapper.reset();
         emit({
           present: false,
           x: smoothX,
@@ -138,7 +141,10 @@ export async function startHandTracking(
     }
     missedFrames = 0;
     const primary = hands[0];
-    const mapped = mapToPad(primary[PALM].x, primary[PALM].y);
+    // Smooth the span so a single misread frame doesn't warp the mapper box
+    const span = handSpan(primary);
+    smoothSpan = smoothSpan === 0 ? span : smoothSpan + (span - smoothSpan) * 0.1;
+    const mapped = mapper.update(primary[PALM], smoothSpan);
     if (!hadHand) {
       // Snap on reacquire so the cursor doesn't glide in from its old spot
       smoothX = mapped.x;
