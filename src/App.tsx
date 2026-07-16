@@ -13,6 +13,7 @@ import { createAttractScheduler, type AttractScheduler } from "./app/attractLoop
 import { initialState, reduce, type InferenceSummary } from "./app/state";
 import Hud from "./hud/Hud";
 import Stage from "./hud/Stage";
+import { GestureController } from "./gesture/gestureController";
 import { startHandTracking, type GestureState } from "./gesture/handTracker";
 import DebugPanel, { type DebugData } from "./hud/DebugPanel";
 import type { DrawPadHandle } from "./hud/DrawPad";
@@ -48,9 +49,7 @@ export default function App() {
   const [padReset, setPadReset] = useState(0);
   const [gestureActive, setGestureActive] = useState(false);
   const [wakeProgress, setWakeProgress] = useState(0);
-  const wakeProgressRef = useRef(0);
   const padRef = useRef<DrawPadHandle>(null);
-  const gestureDrawingRef = useRef(false);
   const [debugOpen, setDebugOpen] = useState(
     () => new URLSearchParams(window.location.search).has("debug")
   );
@@ -166,91 +165,46 @@ export default function App() {
   // raise a hand and HOLD IT ~5s (a progress ring fills) to start, then
   // ✊ fist = pen down, ✋ open = pen lifted between strokes, and crossing
   // both arms in an ✕ clears the pad. Fails silently into mouse-only when
-  // there's no camera/permission.
+  // there's no camera/permission. All hold-timing and latching rules live
+  // in GestureController (pure, unit-tested); this effect only interprets
+  // its commands against dispatch/DrawPad.
   useEffect(() => {
     let dispose: (() => void) | undefined;
     let cancelled = false;
-    let wakeStart: number | null = null;
-    let crossStart: number | null = null;
-    let crossFired = false;
-    const WAKE_HOLD_MS = 5000;
-    const CROSS_HOLD_MS = 800;
-    const showWake = (p: number) => {
-      // Quantized so ~30fps callbacks cause ~50 renders per fill, not 150
-      const q = Math.min(1, Math.round(p * 50) / 50);
-      if (q !== wakeProgressRef.current) {
-        wakeProgressRef.current = q;
-        setWakeProgress(q);
-      }
-    };
-    const endDrawing = () => {
-      if (gestureDrawingRef.current) {
-        gestureDrawingRef.current = false;
-        padRef.current?.penUp();
-      }
-    };
+    const controller = new GestureController();
     const onGesture = (g: GestureState) => {
       if (g.present) window.dispatchEvent(new Event("gesture-activity"));
-      const mode = stateRef.current.mode;
-      if (!g.present) {
-        wakeStart = null;
-        crossStart = null;
-        crossFired = false;
-        showWake(0);
-        endDrawing();
-        padRef.current?.setCursor(null);
-        return;
-      }
-      if (mode === "attract") {
-        // Hold a raised hand for the full window — any pose, since finger
-        // detail is unreliable at distance; the sustained hold is what
-        // filters out passersby. The HUD ring mirrors this timer.
-        if (g.raised) {
-          wakeStart ??= performance.now();
-          const progress = (performance.now() - wakeStart) / WAKE_HOLD_MS;
-          showWake(progress);
-          if (progress >= 1) {
-            wakeStart = null;
-            showWake(0);
+      for (const cmd of controller.update(g, stateRef.current.mode, performance.now())) {
+        switch (cmd.type) {
+          case "wake":
             dispatch({ type: "userActive" });
-          }
-        } else {
-          wakeStart = null;
-          showWake(0);
+            break;
+          case "wakeProgress":
+            setWakeProgress(cmd.value);
+            break;
+          case "clear":
+            handleClear();
+            break;
+          case "penDown":
+            padRef.current?.penDown(cmd.x * DRAW_PAD_SIZE, cmd.y * DRAW_PAD_SIZE);
+            break;
+          case "penMove":
+            padRef.current?.penMove(cmd.x * DRAW_PAD_SIZE, cmd.y * DRAW_PAD_SIZE);
+            break;
+          case "penUp":
+            padRef.current?.penUp();
+            break;
+          case "cursor":
+            padRef.current?.setCursor(
+              cmd.cursor && {
+                x: cmd.cursor.x * DRAW_PAD_SIZE,
+                y: cmd.cursor.y * DRAW_PAD_SIZE,
+                drawing: cmd.cursor.drawing,
+              }
+            );
+            break;
         }
-        return;
       }
-      wakeStart = null;
-      showWake(0);
-
-      // Arms crossed in an ✕ (both palms together), held briefly → clear.
-      // Latched so one ✕ clears once, not every frame it stays crossed.
-      if (g.crossed) {
-        endDrawing();
-        crossStart ??= performance.now();
-        if (!crossFired && performance.now() - crossStart >= CROSS_HOLD_MS) {
-          crossFired = true;
-          handleClear();
-        }
-        padRef.current?.setCursor(null);
-        return;
-      }
-      crossStart = null;
-      crossFired = false;
-
-      const x = g.x * DRAW_PAD_SIZE;
-      const y = g.y * DRAW_PAD_SIZE;
-      if (g.pose === "fist") {
-        if (gestureDrawingRef.current) {
-          padRef.current?.penMove(x, y);
-        } else {
-          gestureDrawingRef.current = true;
-          padRef.current?.penDown(x, y);
-        }
-      } else {
-        endDrawing();
-      }
-      padRef.current?.setCursor({ x, y, drawing: g.pose === "fist" && mode !== "infer" });
     };
     // Windows webcams are typically single-consumer — if another app holds
     // the camera at load, keep retrying instead of giving up forever.
