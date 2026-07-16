@@ -9,7 +9,6 @@
 //
 // The app never trains or downloads anything; these assets are the contract.
 
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { get } from "node:https";
 import { dirname, join } from "node:path";

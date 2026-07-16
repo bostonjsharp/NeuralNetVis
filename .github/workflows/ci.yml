@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # postinstall downloads ~15MB of MediaPipe models; cache them keyed on
+      # the fetch script so runs stay hermetic and fast. A download failure
+      # is non-fatal by design (the app degrades to mouse-only).
+      - uses: actions/cache@v4
+        with:
+          path: public/models
+          key: mediapipe-models-${{ hashFiles('scripts/fetch-gesture-assets.mjs') }}
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

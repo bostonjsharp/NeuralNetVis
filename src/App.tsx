@@ -153,7 +153,6 @@ export default function App() {
       window.clearTimeout(cinematicTimer.current);
       window.clearTimeout(barsTimer.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attract]);
 
   useIdleReset(!attract, IDLE_MS, () => {
