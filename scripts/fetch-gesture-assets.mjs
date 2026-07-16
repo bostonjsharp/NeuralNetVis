@@ -50,6 +50,9 @@ for (const name of readdirSync(WASM_SRC)) {
   console.log(`copied ${name}`);
 }
 
+// Download failures must not fail `npm install`: the app itself degrades
+// gracefully to mouse-only without these models, so the install should too
+// (offline laptops, firewalled networks, CI runners).
 for (const { dest, url } of MODELS) {
   const name = dest.split(/[\\/]/).pop();
   if (existsSync(dest) && statSync(dest).size > 1_000_000) {
@@ -58,6 +61,14 @@ for (const { dest, url } of MODELS) {
   }
   mkdirSync(dirname(dest), { recursive: true });
   console.log(`downloading ${name} ...`);
-  writeFileSync(dest, await fetchBuffer(url));
-  console.log(`wrote ${dest}`);
+  try {
+    writeFileSync(dest, await fetchBuffer(url));
+    console.log(`wrote ${dest}`);
+  } catch (err) {
+    console.warn(
+      `WARNING: could not download ${name} (${err?.message ?? err}).\n` +
+        `  Hand-gesture control stays disabled (the app runs mouse-only).\n` +
+        `  Re-run \`npm run gestures\` with network access to fetch it.`
+    );
+  }
 }
