@@ -3,12 +3,12 @@ import { installContextLossRecovery, RESTORE_DEADLINE_MS } from "./contextLossRe
 
 describe("installContextLossRecovery", () => {
   let canvas: HTMLCanvasElement;
-  let reload: ReturnType<typeof vi.fn>;
+  let reload: ReturnType<typeof vi.fn<() => void>>;
 
   beforeEach(() => {
     vi.useFakeTimers();
     canvas = document.createElement("canvas");
-    reload = vi.fn();
+    reload = vi.fn<() => void>();
   });
 
   afterEach(() => {
