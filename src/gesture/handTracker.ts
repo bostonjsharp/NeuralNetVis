@@ -41,6 +41,14 @@ const NOMINAL_DT = 1 / 30;
  *  grace a 5-second wake hold would reset on every blip. */
 const ABSENCE_GRACE_FRAMES = 20;
 
+/** Body pose runs every Nth camera frame (~10Hz at a 60fps camera). It only
+ *  feeds the ✕ clear, which must be HELD for 800ms — per-frame detection
+ *  buys nothing there, and at 60fps it doubles the GPU inference load
+ *  contending with the bloom-heavy render loop. The held result is at most
+ *  ~83ms stale, an order of magnitude inside the hold window. The hand
+ *  model stays per-frame: a stroking fist is fast and blur-sensitive. */
+const POSE_FRAME_STRIDE = 6;
+
 /** Per-frame diagnostics for the dev overlay (G key / ?debug). */
 export interface HandDebugFrame {
   hands: {
@@ -148,6 +156,8 @@ export async function startHandTracking(
   let hadHand = false;
   let missedFrames = 0;
   let lastPrimaryPalm: Landmark | null = null;
+  let poseFrame = 0;
+  let lastBodyPose: PoseLandmark[] | undefined;
   let raf = 0;
   let lastVideoTime = -1;
   let disposed = false;
@@ -177,10 +187,10 @@ export async function startHandTracking(
     // with two-hands-wrists-together as the fallback signal. This is the
     // ONLY thing the body-pose model drives — it is far too noisy through a
     // sleeve to be trusted with the pen.
-    let bodyPose: PoseLandmark[] | undefined;
-    if (poseLandmarker) {
-      bodyPose = poseLandmarker.detectForVideo(video, now).landmarks?.[0];
+    if (poseLandmarker && poseFrame++ % POSE_FRAME_STRIDE === 0) {
+      lastBodyPose = poseLandmarker.detectForVideo(video, now).landmarks?.[0];
     }
+    const bodyPose = lastBodyPose;
     const poseCrossed = bodyPose ? forearmsCrossed(bodyPose) : false;
     const crossed =
       poseCrossed ||
