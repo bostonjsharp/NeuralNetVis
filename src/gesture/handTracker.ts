@@ -1,20 +1,22 @@
-import { FilesetResolver, HandLandmarker, PoseLandmarker } from "@mediapipe/tasks-vision";
+import { FilesetResolver, GestureRecognizer, PoseLandmarker } from "@mediapipe/tasks-vision";
 import {
-  classifyHand,
   forearmsCrossed,
   handSpan,
   isCloseEnough,
   isRaised,
+  NO_EVIDENCE,
+  OneEuroFilter,
   PadMapper,
   PALM,
+  penEvidence,
+  PenLatch,
   pickPrimaryHand,
   POSE,
-  PoseStabilizer,
-  RAISE_LINE,
   WRIST,
   wristsClose,
-  type HandPose,
+  type GestureCategory,
   type Landmark,
+  type PenPose,
   type PoseLandmark,
 } from "./handGesture";
 
@@ -23,16 +25,16 @@ export interface GestureState {
   /** Normalized pad-space position (0..1, already mirrored + region-mapped). */
   x: number;
   y: number;
-  /** Debounced pose of the primary hand: ✊ fist = pen down, ✋ open = pen lifted. */
-  pose: Exclude<HandPose, "unknown">;
+  /** Latched pose of the primary hand: ✊ fist = pen down, ✋ open = pen lifted. */
+  pose: PenPose;
   /** Palm held high in the camera frame (the wake gesture). */
   raised: boolean;
   /** Both hands up with palms together/crossed — the ✕ clear gesture. */
   crossed: boolean;
 }
 
-/** Exponential smoothing factor for the cursor (higher = snappier). */
-const SMOOTHING = 0.35;
+/** Fallback timestep when the camera clock gives us nothing useful. */
+const NOMINAL_DT = 1 / 30;
 
 /** Consecutive hand-less camera frames tolerated before reporting absence.
  *  Tracking drops out for a frame or two constantly at 2m — without this
@@ -45,7 +47,9 @@ export interface HandDebugFrame {
     landmarks: Landmark[];
     span: number;
     closeEnough: boolean;
-    rawPose: HandPose;
+    /** Top canned gesture the recognizer named for this hand. */
+    gesture: string;
+    score: number;
   }[];
   /** Which entry in `hands` is the pen hand (-1 when none). */
   primaryIndex: number;
@@ -57,9 +61,8 @@ export interface HandDebugFrame {
     rightWrist: Landmark;
     crossed: boolean;
   } | null;
-  /** True while the pen is being steered by the body-pose wrist because
-   *  hand detection lost the fist. */
-  penFallback: boolean;
+  /** Pen latch charge (0..1) — how close the pen is to pressing/lifting. */
+  charge: number;
   crossed: boolean;
   /** Last state actually emitted to the app. */
   state: GestureState | null;
@@ -72,17 +75,27 @@ export interface HandDebugSink {
 }
 
 /**
- * Opens the webcam, runs MediaPipe HandLandmarker (assets served locally
- * from public/), and reports a smoothed, debounced gesture state every
- * frame. Throws if there is no camera or permission is denied — callers
- * treat gestures as an optional enhancement and fall back to mouse.
+ * Opens the webcam, runs MediaPipe GestureRecognizer (assets served locally
+ * from public/), and reports a smoothed, latched gesture state every frame.
+ * Throws if there is no camera or permission is denied — callers treat
+ * gestures as an optional enhancement and fall back to mouse.
  */
 export async function startHandTracking(
   onState: (state: GestureState) => void,
   debug?: HandDebugSink
 ): Promise<() => void> {
+  // Ask for 60fps: a fast hand is only blurry because the exposure is long,
+  // and a higher frame rate forces the sensor to shorten it. Blur is what
+  // collapses Closed_Fist confidence mid-stroke (which drains the pen latch),
+  // so this buys both a sharper fist and twice the cursor samples. `ideal`
+  // keeps a 30fps-only webcam working rather than failing the constraint.
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { width: 640, height: 360, facingMode: "user" },
+    video: {
+      width: { ideal: 640 },
+      height: { ideal: 360 },
+      frameRate: { ideal: 60, min: 24 },
+      facingMode: "user",
+    },
   });
   const video = document.createElement("video");
   video.srcObject = stream;
@@ -91,14 +104,21 @@ export async function startHandTracking(
   await video.play();
 
   const fileset = await FilesetResolver.forVisionTasks("mediapipe-wasm");
-  const landmarker = await HandLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: "models/hand_landmarker.task", delegate: "GPU" },
+  // GestureRecognizer = HandLandmarker + a *trained* fist/palm classifier.
+  // Hand-rolled finger-curl ratios could not survive a knit sleeve at 2m;
+  // this ships the same 21 landmarks plus a confidence per canned gesture.
+  const recognizer = await GestureRecognizer.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: "models/gesture_recognizer.task", delegate: "GPU" },
     runningMode: "VIDEO",
     numHands: 2, // second hand only matters for the arms-crossed clear
     // Hands are small in frame at 2m — the defaults (0.5) drop them
     minHandDetectionConfidence: 0.35,
     minHandPresenceConfidence: 0.35,
     minTrackingConfidence: 0.35,
+    // Report low-confidence guesses too: PenLatch consumes the score, and a
+    // weak-but-real fist should still push the pen down. Thresholding here
+    // would throw away exactly the gradient the latch is built to integrate.
+    cannedGesturesClassifierOptions: { scoreThreshold: 0.1 },
   });
   // Body pose reads at far greater range than hands; it carries the ✕
   // detection (forearm segments crossing). Optional — hands-only if the
@@ -115,22 +135,19 @@ export async function startHandTracking(
   }
   debug?.attachVideo(video);
 
-  const stabilizer = new PoseStabilizer();
+  const latch = new PenLatch();
   const mapper = new PadMapper();
+  // Speed-adaptive smoothing: steady when the hand hovers, near-transparent
+  // when it strokes. A fixed factor could only ever be one or the other.
+  const filterX = new OneEuroFilter();
+  const filterY = new OneEuroFilter();
+  let lastFrameTime = 0;
   let smoothX = 0.5;
   let smoothY = 0.5;
   let smoothSpan = 0;
   let hadHand = false;
   let missedFrames = 0;
   let lastPrimaryPalm: Landmark | null = null;
-  // Pose-wrist fallback: hand detection routinely loses a clenched fist at
-  // 2m, but the body model keeps tracking the wrist. While both are
-  // visible we learn which body wrist is the pen and the palm's offset
-  // from it; on hand loss the pen keeps moving from the pose wrist.
-  let penSide: "left" | "right" | null = null;
-  const palmOffset = { x: 0, y: 0 };
-  let fallbackFrames = 0;
-  const FALLBACK_MAX_FRAMES = 90; // ~3s of pose-steered pen before giving up
   let raf = 0;
   let lastVideoTime = -1;
   let disposed = false;
@@ -147,45 +164,50 @@ export async function startHandTracking(
     if (video.currentTime === lastVideoTime) return; // no new camera frame yet
     lastVideoTime = video.currentTime;
     const now = performance.now();
-    const result = landmarker.detectForVideo(video, now);
+    const result = recognizer.recognizeForVideo(video, now);
     const allHands = result.landmarks ?? [];
-    // Hands too small in frame are far beyond the visitor zone — ignore them
-    const hands = allHands.filter(isCloseEnough);
+    const allGestures: GestureCategory[][] = result.gestures ?? [];
+    // Hands too small in frame are far beyond the visitor zone — ignore them.
+    // Keep each hand's gesture scores paired with it through the filter.
+    const hands = allHands
+      .map((landmarks, i) => ({ landmarks, gestures: allGestures[i] ?? [] }))
+      .filter((h) => isCloseEnough(h.landmarks));
 
     // ✕ detection: forearm segments crossing (body pose, long range),
-    // with two-hands-wrists-together as the fallback signal
+    // with two-hands-wrists-together as the fallback signal. This is the
+    // ONLY thing the body-pose model drives — it is far too noisy through a
+    // sleeve to be trusted with the pen.
     let bodyPose: PoseLandmark[] | undefined;
     if (poseLandmarker) {
       bodyPose = poseLandmarker.detectForVideo(video, now).landmarks?.[0];
     }
     const poseCrossed = bodyPose ? forearmsCrossed(bodyPose) : false;
     const crossed =
-      poseCrossed || (hands.length >= 2 && wristsClose(hands[0][WRIST], hands[1][WRIST]));
+      poseCrossed ||
+      (hands.length >= 2 && wristsClose(hands[0].landmarks[WRIST], hands[1].landmarks[WRIST]));
 
     const primaryIndex =
-      hands.length > 0 ? pickPrimaryHand(hands.map((h) => h[PALM]), lastPrimaryPalm) : -1;
-
-    const penWrist =
-      bodyPose && penSide
-        ? bodyPose[penSide === "left" ? POSE.leftWrist : POSE.rightWrist]
-        : undefined;
-    const canFallback =
-      hands.length === 0 &&
-      hadHand &&
-      !!penWrist &&
-      (penWrist.visibility ?? 1) > 0.5 &&
-      fallbackFrames < FALLBACK_MAX_FRAMES;
+      hands.length > 0
+        ? pickPrimaryHand(
+            hands.map((h) => h.landmarks[PALM]),
+            lastPrimaryPalm
+          )
+        : -1;
 
     if (debug) {
-      const primaryLandmarks = primaryIndex >= 0 ? hands[primaryIndex] : null;
+      const primaryHand = primaryIndex >= 0 ? hands[primaryIndex] : null;
       debug.onFrame({
-        hands: allHands.map((landmarks) => ({
-          landmarks,
-          span: handSpan(landmarks),
-          closeEnough: isCloseEnough(landmarks),
-          rawPose: classifyHand(landmarks),
-        })),
-        primaryIndex: primaryLandmarks ? allHands.indexOf(primaryLandmarks) : -1,
+        hands: allHands.map((landmarks, i) => {
+          const top = (allGestures[i] ?? [])[0];
+          return {
+            landmarks,
+            span: handSpan(landmarks),
+            closeEnough: isCloseEnough(landmarks),
+            gesture: top?.categoryName ?? "None",
+            score: top?.score ?? 0,
+          };
+        }),
+        primaryIndex: primaryHand ? allHands.indexOf(primaryHand.landmarks) : -1,
         forearms: bodyPose
           ? {
               leftElbow: bodyPose[POSE.leftElbow],
@@ -195,39 +217,24 @@ export async function startHandTracking(
               crossed: poseCrossed,
             }
           : null,
-        penFallback: canFallback,
+        charge: latch.level(),
         crossed,
         state: lastEmitted,
       });
     }
+
     if (hands.length === 0) {
-      if (canFallback && penWrist) {
-        // Steer the pen from the body wrist; keep the current pose (a
-        // lost hand mid-draw is almost always still a fist — open hands
-        // redetect immediately).
-        fallbackFrames++;
-        missedFrames = 0;
-        const estimate = { x: penWrist.x + palmOffset.x, y: penWrist.y + palmOffset.y };
-        const mapped = mapper.update(estimate, smoothSpan || 0.04);
-        smoothX += (mapped.x - smoothX) * SMOOTHING;
-        smoothY += (mapped.y - smoothY) * SMOOTHING;
-        lastPrimaryPalm = estimate;
-        emit({
-          present: true,
-          x: smoothX,
-          y: smoothY,
-          pose: lastEmitted?.present ? lastEmitted.pose : "open",
-          raised: estimate.y < RAISE_LINE,
-          crossed,
-        });
-        return;
-      }
-      if (hadHand && ++missedFrames > ABSENCE_GRACE_FRAMES) {
+      if (!hadHand) return;
+      // No hand is not a fist. Bleed the latch down instead of freezing the
+      // last pose: a brief dropout rides through, a real absence lifts the
+      // pen well before the cursor itself is withdrawn.
+      const pose = latch.update(NO_EVIDENCE);
+      if (++missedFrames > ABSENCE_GRACE_FRAMES) {
         hadHand = false;
-        stabilizer.reset();
+        latch.reset();
         mapper.reset();
+        lastFrameTime = 0;
         lastPrimaryPalm = null;
-        penSide = null;
         emit({
           present: false,
           x: smoothX,
@@ -236,47 +243,50 @@ export async function startHandTracking(
           raised: false,
           crossed: false,
         });
+        return;
       }
+      // Hold the cursor where it was — never invent a position from a model
+      // that cannot see through a sleeve.
+      emit({ present: true, x: smoothX, y: smoothY, pose, raised: false, crossed });
       return;
     }
+
     missedFrames = 0;
-    fallbackFrames = 0;
     const primary = hands[primaryIndex];
-    lastPrimaryPalm = { x: primary[PALM].x, y: primary[PALM].y };
-    // Learn which body wrist is the pen and the palm's offset from it
-    if (bodyPose) {
-      const palm = primary[PALM];
-      const leftWrist = bodyPose[POSE.leftWrist];
-      const rightWrist = bodyPose[POSE.rightWrist];
-      const dLeft = Math.hypot(leftWrist.x - palm.x, leftWrist.y - palm.y);
-      const dRight = Math.hypot(rightWrist.x - palm.x, rightWrist.y - palm.y);
-      penSide = dLeft < dRight ? "left" : "right";
-      const wristLm = dLeft < dRight ? leftWrist : rightWrist;
-      palmOffset.x += (palm.x - wristLm.x - palmOffset.x) * 0.2;
-      palmOffset.y += (palm.y - wristLm.y - palmOffset.y) * 0.2;
-    }
+    const palm = primary.landmarks[PALM];
+    lastPrimaryPalm = { x: palm.x, y: palm.y };
     // Smooth the span so a single misread frame doesn't warp the mapper box
-    const span = handSpan(primary);
+    const span = handSpan(primary.landmarks);
     smoothSpan = smoothSpan === 0 ? span : smoothSpan + (span - smoothSpan) * 0.1;
-    const mapped = mapper.update(primary[PALM], smoothSpan);
+    const mapped = mapper.update(palm, smoothSpan);
     if (!hadHand) {
       // Snap on reacquire so the cursor doesn't glide in from its old spot
-      smoothX = mapped.x;
-      smoothY = mapped.y;
+      filterX.reset();
+      filterY.reset();
       hadHand = true;
-    } else {
-      smoothX += (mapped.x - smoothX) * SMOOTHING;
-      smoothY += (mapped.y - smoothY) * SMOOTHING;
     }
-    const pose = stabilizer.update(classifyHand(primary)) as Exclude<HandPose, "unknown">;
-    emit({ present: true, x: smoothX, y: smoothY, pose, raised: isRaised(primary), crossed });
+    // Real elapsed time, not an assumed 30fps — the camera's rate varies with
+    // light, and a filter fed the wrong dt mis-scales its own speed estimate.
+    const dt = lastFrameTime ? (now - lastFrameTime) / 1000 : NOMINAL_DT;
+    lastFrameTime = now;
+    smoothX = filterX.filter(mapped.x, dt);
+    smoothY = filterY.filter(mapped.y, dt);
+    const pose = latch.update(penEvidence(primary.gestures));
+    emit({
+      present: true,
+      x: smoothX,
+      y: smoothY,
+      pose,
+      raised: isRaised(primary.landmarks),
+      crossed,
+    });
   };
   loop();
 
   return () => {
     disposed = true;
     cancelAnimationFrame(raf);
-    landmarker.close();
+    recognizer.close();
     poseLandmarker?.close();
     for (const track of stream.getTracks()) track.stop();
   };

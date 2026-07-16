@@ -14,8 +14,11 @@ const WASM_SRC = join(ROOT, "node_modules", "@mediapipe", "tasks-vision", "wasm"
 const WASM_DEST = join(ROOT, "public", "mediapipe-wasm");
 const MODELS = [
   {
-    dest: join(ROOT, "public", "models", "hand_landmarker.task"),
-    url: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+    // Hand landmarks + a trained canned-gesture classifier (Closed_Fist /
+    // Open_Palm with confidences). Supersedes hand_landmarker.task: curl
+    // ratios computed by hand were not robust to sleeves at 2m.
+    dest: join(ROOT, "public", "models", "gesture_recognizer.task"),
+    url: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
   },
   {
     // Body landmarks read at far greater range than hands — used to see

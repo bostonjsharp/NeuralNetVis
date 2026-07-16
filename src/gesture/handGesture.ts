@@ -10,43 +10,47 @@ export interface Landmark {
   y: number;
 }
 
-export type HandPose = "fist" | "open" | "unknown";
+/** What the pen is doing. There is no third "unknown" state on purpose —
+ *  see PenLatch: uncertainty is an absence of drive, not a pose. */
+export type PenPose = "fist" | "open";
 
-/** Finger [PIP, TIP] landmark indices — thumb excluded (unreliable folder). */
-const FINGERS: readonly [number, number][] = [
-  [6, 8], // index
-  [10, 12], // middle
-  [14, 16], // ring
-  [18, 20], // pinky
-];
 export const WRIST = 0;
 
-/**
- * Deliberately strict margins for a camera 2+ meters away: a finger only
- * counts as EXTENDED when its tip is clearly past its middle joint
- * (fully straightened), and only as FOLDED when clearly curled back.
- * Half-open hands land in neither bucket, so casual poses read as
- * "unknown" and the stabilizer holds the previous state — visitors must
- * really clench or really splay.
- */
-const EXTENDED_RATIO = 1.25;
-/** Generous: at 2m a clenched fist's fingers read as barely folded, and a
- *  lost fist mid-stroke chops the drawing. */
-const FOLDED_RATIO = 1.12;
+/** One canned-gesture guess from MediaPipe's GestureRecognizer. */
+export interface GestureCategory {
+  categoryName: string;
+  score: number;
+}
 
-export function classifyHand(landmarks: Landmark[]): HandPose {
-  const wrist = landmarks[WRIST];
-  const dist = (a: Landmark) => Math.hypot(a.x - wrist.x, a.y - wrist.y);
-  let extendedCount = 0;
-  let foldedCount = 0;
-  for (const [pip, tip] of FINGERS) {
-    const ratio = dist(landmarks[tip]) / Math.max(dist(landmarks[pip]), 1e-6);
-    if (ratio > EXTENDED_RATIO) extendedCount++;
-    if (ratio < FOLDED_RATIO) foldedCount++;
+/** How strongly this frame argues for pen-down vs pen-up, each in 0..1. */
+export interface PenEvidence {
+  fist: number;
+  open: number;
+}
+
+export const NO_EVIDENCE: PenEvidence = { fist: 0, open: 0 };
+
+/** Splayed fingers — unambiguously not a pen grip. */
+const OPEN_GESTURES = new Set(["Open_Palm", "Victory", "Pointing_Up"]);
+
+/**
+ * Turns the recognizer's canned-gesture scores into pen evidence.
+ *
+ * Anything we can't read (`None`, an empty list, or a curled-but-not-fist
+ * shape like Thumb_Up) yields NO_EVIDENCE rather than a guess. That matters:
+ * the old ratio classifier bucketed every uncertain frame as "unknown", and
+ * the stabilizer treated "unknown" as "hold current state" — so a hand the
+ * model half-saw kept the pen welded down. Uncertainty must be *silent*, so
+ * the latch below can decay the pen back up on its own.
+ */
+export function penEvidence(gestures: GestureCategory[]): PenEvidence {
+  let fist = 0;
+  let open = 0;
+  for (const { categoryName, score } of gestures) {
+    if (categoryName === "Closed_Fist") fist = Math.max(fist, score);
+    else if (OPEN_GESTURES.has(categoryName)) open = Math.max(open, score);
   }
-  if (foldedCount >= 3 && extendedCount === 0) return "fist";
-  if (extendedCount >= 3 && foldedCount === 0) return "open";
-  return "unknown";
+  return { fist, open };
 }
 
 /** Palm anchor: middle-finger MCP tracks the hand's center steadily. */
@@ -209,46 +213,149 @@ export class PadMapper {
   }
 }
 
-/** Frames a pose flip must hold before it's reported. Asymmetric: the pen
- *  presses quickly but releases slowly, so a noisy frame or two mid-stroke
- *  never chops the drawing. */
-const DEFAULT_HOLD_FRAMES: Record<Exclude<HandPose, "unknown">, number> = {
-  fist: 4,
-  open: 8,
-};
+/** A plain exponential low-pass, re-seedable. Building block of OneEuro. */
+class LowPass {
+  private value: number | null = null;
 
-/**
- * Debounces raw per-frame poses: a state flip must hold for a streak of
- * consecutive frames before it's reported, so a mid-curl flicker doesn't
- * chop one stroke into many or fire an accidental clear.
- */
-export class PoseStabilizer {
-  private stable: HandPose = "open";
-  private candidate: HandPose | null = null;
-  private streak = 0;
-
-  constructor(private readonly holdFrames = DEFAULT_HOLD_FRAMES) {}
-
-  update(raw: HandPose): HandPose {
-    if (raw === "unknown" || raw === this.stable) {
-      this.candidate = null;
-      this.streak = 0;
-      return this.stable;
-    }
-    if (raw !== this.candidate) {
-      this.candidate = raw;
-      this.streak = 1;
-    } else if (++this.streak >= this.holdFrames[raw]) {
-      this.stable = raw;
-      this.candidate = null;
-      this.streak = 0;
-    }
-    return this.stable;
+  filter(x: number, alpha: number): number {
+    this.value = this.value === null ? x : this.value + alpha * (x - this.value);
+    return this.value;
   }
 
   reset(): void {
-    this.stable = "open";
-    this.candidate = null;
-    this.streak = 0;
+    this.value = null;
+  }
+}
+
+export interface OneEuroOptions {
+  /** Cutoff (Hz) when the hand is still — lower = steadier, but laggier. */
+  minCutoff: number;
+  /** How aggressively the cutoff opens up with speed — the anti-lag term. */
+  beta: number;
+  /** Cutoff (Hz) for the speed estimate itself. */
+  dCutoff: number;
+}
+
+/**
+ * Tuned in pad units (0..1) at camera rate, by the filter's own recipe: set
+ * `minCutoff` for the jitter you accept while the hand hovers, then raise
+ * `beta` until fast strokes stop lagging.
+ *
+ * A quick digit stroke crosses the pad in ~0.3s (speed ≈ 3/s). At beta 3 that
+ * lifts the cutoff from 1Hz to ~10Hz, leaving under 0.05 pad units of lag —
+ * about a frame of travel, versus 0.19 (a fifth of the pad!) under the fixed
+ * 0.35 factor this replaces. A hovering hand barely moves, so its cutoff
+ * stays near 1Hz and it is smoothed *harder* than before.
+ */
+const DEFAULT_EURO: OneEuroOptions = { minCutoff: 1.0, beta: 3.0, dCutoff: 1.0 };
+
+/**
+ * One Euro filter (Casiez, Roussel & Vogel, CHI 2012).
+ *
+ * Fixed exponential smoothing forces a single choice between jitter at rest
+ * and lag in motion — its tracking error grows in direct proportion to hand
+ * speed, which is why fast strokes trailed and cut their corners. This makes
+ * the cutoff frequency a function of the estimated speed: it filters hard
+ * when the hand is nearly still, and opens up (approaching raw passthrough)
+ * as the hand moves, so quick strokes land where they were drawn.
+ */
+export class OneEuroFilter {
+  private readonly x = new LowPass();
+  private readonly dx = new LowPass();
+  private previous: number | null = null;
+
+  constructor(private readonly options: OneEuroOptions = DEFAULT_EURO) {}
+
+  /** Smoothing factor for a cutoff frequency over a timestep. */
+  private static alpha(cutoff: number, dt: number): number {
+    const tau = 1 / (2 * Math.PI * cutoff);
+    return 1 / (1 + tau / dt);
+  }
+
+  /** @param dt seconds since the previous sample. */
+  filter(value: number, dt: number): number {
+    const step = dt > 0 ? dt : 1 / 30; // a stalled clock must not divide by zero
+    const speed = this.previous === null ? 0 : (value - this.previous) / step;
+    this.previous = value;
+    const smoothSpeed = this.dx.filter(speed, OneEuroFilter.alpha(this.options.dCutoff, step));
+    const cutoff = this.options.minCutoff + this.options.beta * Math.abs(smoothSpeed);
+    return this.x.filter(value, OneEuroFilter.alpha(cutoff, step));
+  }
+
+  reset(): void {
+    this.x.reset();
+    this.dx.reset();
+    this.previous = null;
+  }
+}
+
+export interface PenLatchOptions {
+  /** Charge gained per frame at full fist confidence. */
+  press: number;
+  /** Charge shed per frame at full open confidence. */
+  release: number;
+  /** Charge shed per frame when the hand reads as nothing at all. */
+  decay: number;
+  /** Schmitt trigger: charge at/above this puts the pen down. */
+  downAt: number;
+  /** …and at/below this lifts it. The gap is the anti-flicker margin. */
+  upAt: number;
+}
+
+/** Press ≈4 confident frames; release ≈2. An open hand must always be able
+ *  to win faster than a fist can grab — the opposite bias made the pen
+ *  impossible to put down. `decay` alone lifts the pen in ~0.5s at 30fps,
+ *  which is the safety net for a hand the model simply cannot read. */
+const DEFAULT_LATCH: PenLatchOptions = {
+  press: 0.25,
+  release: 0.4,
+  decay: 0.05,
+  downAt: 0.7,
+  upAt: 0.3,
+};
+
+/**
+ * Integrates per-frame gesture confidence into a pen up/down decision.
+ *
+ * A charge in 0..1 is driven up by fist evidence, down by open evidence, and
+ * *always* bled down by `decay` when the frame carries no evidence either
+ * way. A Schmitt trigger reads the charge, so a stroke rides through the
+ * intermittent misses that sleeves and 2m of distance guarantee — but a hand
+ * the model can no longer read as a fist will always, eventually, let go.
+ *
+ * This replaces a consecutive-frame streak counter, which could be reset to
+ * zero by a single uncertain frame and therefore never completed a release.
+ */
+export class PenLatch {
+  private charge = 0;
+  private down = false;
+
+  constructor(private readonly options: PenLatchOptions = DEFAULT_LATCH) {}
+
+  update(evidence: PenEvidence): PenPose {
+    const { press, release, decay, downAt, upAt } = this.options;
+    const net = evidence.fist - evidence.open;
+    if (net > 0) this.charge += net * press;
+    else if (net < 0) this.charge += net * release; // net is negative
+    else this.charge -= decay; // no evidence, or a perfect tie → fail safe
+    this.charge = Math.min(1, Math.max(0, this.charge));
+
+    if (this.charge >= downAt) this.down = true;
+    else if (this.charge <= upAt) this.down = false;
+    return this.pose();
+  }
+
+  pose(): PenPose {
+    return this.down ? "fist" : "open";
+  }
+
+  /** Live charge, for the debug overlay. */
+  level(): number {
+    return this.charge;
+  }
+
+  reset(): void {
+    this.charge = 0;
+    this.down = false;
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { RAISE_LINE, WRIST, type HandPose } from "../gesture/handGesture";
+import { RAISE_LINE, WRIST } from "../gesture/handGesture";
 import type { HandDebugFrame } from "../gesture/handTracker";
 
 /** MediaPipe hand skeleton edges, for drawing. */
@@ -12,11 +12,15 @@ const BONES: readonly [number, number][] = [
   [0, 17],
 ];
 
-const POSE_COLOR: Record<HandPose, string> = {
-  fist: "#ffa03d",
-  open: "#4dbfff",
-  unknown: "#8d97b4",
-};
+/** Colour by what the gesture recognizer named, not by a derived pose —
+ *  so the overlay shows the raw signal the latch is actually integrating. */
+function gestureColor(gesture: string): string {
+  if (gesture === "Closed_Fist") return "#ffa03d";
+  if (gesture === "Open_Palm" || gesture === "Victory" || gesture === "Pointing_Up") {
+    return "#4dbfff";
+  }
+  return "#8d97b4"; // unreadable → no evidence either way
+}
 
 export interface DebugData {
   video: HTMLVideoElement | null;
@@ -91,7 +95,7 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
 
       for (let i = 0; i < frame.hands.length; i++) {
         const hand = frame.hands[i];
-        const color = hand.closeEnough ? POSE_COLOR[hand.rawPose] : "#e5484d";
+        const color = hand.closeEnough ? gestureColor(hand.gesture) : "#e5484d";
         ctx.strokeStyle = color;
         ctx.lineWidth = i === frame.primaryIndex ? 3.5 : 2;
         for (const [a, b] of BONES) {
@@ -108,8 +112,11 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
         }
         const wrist = hand.landmarks[WRIST];
         const penTag = i === frame.primaryIndex ? "PEN · " : "";
+        const read = hand.closeEnough
+          ? `${hand.gesture} ${hand.score.toFixed(2)}`
+          : "too far";
         ctx.fillText(
-          `${penTag}${hand.closeEnough ? hand.rawPose : "too far"} · span ${hand.span.toFixed(3)}`,
+          `${penTag}${read} · span ${hand.span.toFixed(3)}`,
           mx(wrist.x) + 8,
           wrist.y * VIEW_H + 16
         );
@@ -126,8 +133,12 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
       }
 
       const s = frame.state;
+      // The charge bar is the thing to watch when the pen misbehaves: it
+      // shows the latch filling toward ✊ (0.7) and bleeding back to ✋ (0.3).
+      const filled = Math.round(frame.charge * 10);
       status.textContent = [
-        `hands: ${frame.hands.length}${frame.penFallback ? " (pen on body wrist)" : ""}`,
+        `hands: ${frame.hands.length}`,
+        `pen ${"█".repeat(filled)}${"░".repeat(10 - filled)} ${frame.charge.toFixed(2)}`,
         `✕: ${frame.crossed}${frame.forearms ? ` (arms ${frame.forearms.crossed ? "crossed" : "apart"})` : " (no body pose)"}`,
         s
           ? `emitted: ${s.present ? `${s.pose}${s.raised ? " · raised" : ""} @ ${s.x.toFixed(2)},${s.y.toFixed(2)}` : "absent"}`
