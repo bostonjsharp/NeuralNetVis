@@ -4,6 +4,7 @@ import type { ForwardResult } from "../nn/inference";
 import type { Net } from "../nn/weights";
 import { CameraRig, type CameraMode } from "./CameraRig";
 import { ConnectionMesh } from "./ConnectionMesh";
+import { installContextLossRecovery } from "./contextLossRecovery";
 import {
   inputRamp,
   neuronPop,
@@ -40,6 +41,10 @@ export function createScene(
   quality: "high" | "low" = "high"
 ): SceneApi {
   const layout: NetworkLayout = buildLayout(net);
+
+  // Three handles a context loss that restores; this reboots the page when
+  // the driver never restores it (the unattended-wall failure mode).
+  const disposeContextWatch = installContextLossRecovery(canvas);
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -163,6 +168,7 @@ export function createScene(
     },
     dispose() {
       cancelAnimationFrame(raf);
+      disposeContextWatch();
       post.dispose();
       starfield.dispose();
       inputPlane.dispose();

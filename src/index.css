@@ -551,3 +551,11 @@ body {
     transform: translateY(0);
   }
 }
+
+/* ErrorBoundary fallback: a crash reads as a blink of dark, not a browser
+   error page. Matches the scene's background color. */
+.crash-veil {
+  position: fixed;
+  inset: 0;
+  background: #050510;
+}
