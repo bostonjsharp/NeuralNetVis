@@ -559,3 +559,111 @@ body {
   inset: 0;
   background: #050510;
 }
+
+/* ---- brain cards (architecture playground) ---- */
+
+.brain-cards {
+  position: absolute;
+  left: 64px;
+  bottom: 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 320px;
+}
+
+.brain-cards__title {
+  font-size: 26px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+}
+
+.brain-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  padding: 10px 18px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 26px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.25s, box-shadow 0.25s, opacity 0.25s;
+}
+
+.brain-card:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.brain-card--active {
+  border-color: var(--cool);
+  box-shadow: var(--glow);
+  opacity: 1;
+}
+
+.brain-card__glyph {
+  width: 64px;
+  height: 40px;
+  flex: none;
+  fill: var(--cool);
+  opacity: 0.85;
+}
+
+.brain-card--active .brain-card__glyph {
+  fill: var(--warm);
+}
+
+.brain-card__name {
+  font-weight: 600;
+  flex: 1;
+}
+
+.brain-card__acc {
+  color: var(--ink-dim);
+  font-size: 21px;
+}
+
+/* Attract mode: a slim, read-only strip showing which brain is thinking */
+.brain-cards--readonly {
+  width: 260px;
+  gap: 8px;
+}
+
+.brain-cards--readonly .brain-card {
+  padding: 6px 14px;
+  font-size: 21px;
+  opacity: 0.6;
+}
+
+.brain-cards--readonly .brain-card--active {
+  opacity: 1;
+}
+
+.brain-cards--readonly .brain-card__glyph {
+  width: 46px;
+  height: 30px;
+}
+
+.brain-cards--readonly .brain-card__acc {
+  font-size: 18px;
+}
+
+/* Cross-brain comparison line under the verdict */
+.hud-verdict__compare {
+  display: block;
+  margin-top: 8px;
+  font-size: 25px;
+  color: var(--ink-dim);
+}
+
+/* Brain-cycle hold ring sits by the cards, not center stage */
+.wake-ring-wrap--brain {
+  top: auto;
+  bottom: 420px;
+  left: 224px;
+}

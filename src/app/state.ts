@@ -19,6 +19,8 @@ export interface InferenceSummary {
   source: "drawn" | "sample";
   /** True label when the input was a bundled sample digit. */
   sampleLabel?: number;
+  /** Which brain produced this verdict (for cross-brain comparisons). */
+  brainId: string;
 }
 
 export interface AppState {

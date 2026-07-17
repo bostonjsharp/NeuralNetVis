@@ -8,7 +8,7 @@ import {
   STAGE_HEIGHT,
   STAGE_WIDTH,
 } from "./app/constants";
-import { createAttractScheduler, type AttractScheduler } from "./app/attractLoop";
+import { attractPlan, createAttractScheduler, type AttractScheduler } from "./app/attractLoop";
 import { initialState, reduce, type InferenceSummary } from "./app/state";
 import Hud from "./hud/Hud";
 import Stage from "./hud/Stage";
@@ -41,6 +41,12 @@ export default function App() {
   schedulerRef.current ??= createAttractScheduler(samples.length);
 
   const [displayed, setDisplayed] = useState<InferenceSummary | null>(null);
+  const displayedRef = useRef(displayed);
+  displayedRef.current = displayed;
+  /** The previous brain's verdict on the same input (the comparison beat). */
+  const [comparison, setComparison] = useState<InferenceSummary | null>(null);
+  const prevSummaryRef = useRef<InferenceSummary | null>(null);
+  const prevPixelsRef = useRef<Float32Array | null>(null);
   const [padReset, setPadReset] = useState(0);
   const [gestureActive, setGestureActive] = useState(false);
   const [wakeProgress, setWakeProgress] = useState(0);
@@ -87,7 +93,10 @@ export default function App() {
     window.clearTimeout(autoFireTimer.current);
     window.clearTimeout(cinematicTimer.current);
     window.clearTimeout(barsTimer.current);
+    // Keep the on-screen verdict as the comparison for the re-fire
+    prevSummaryRef.current = displayedRef.current;
     setDisplayed(null);
+    setComparison(null);
     const variant = getVariant(state.brainId);
     sceneRef.current?.setNet(variant.net, { inputTopK: variant.inputTopK }, () =>
       dispatch({ type: "morphDone" })
@@ -98,12 +107,20 @@ export default function App() {
     sceneRef.current?.setMode(attract ? "attract" : "interactive");
   }, [attract]);
 
-  const showResultLater = (summary: InferenceSummary, brainId: string) => {
+  const showResultLater = (summary: InferenceSummary) => {
     window.clearTimeout(barsTimer.current);
     setDisplayed(null);
+    setComparison(null);
+    // A comparison only makes sense against the same input through a
+    // different brain — consumed once, when the bars land.
+    const against = prevSummaryRef.current;
+    prevSummaryRef.current = null;
     // The HUD bars land in sync with the cinematic's output reveal
-    const revealMs = timelineFor(brainId).layerPop.at(-1)! * 1000;
-    barsTimer.current = window.setTimeout(() => setDisplayed(summary), revealMs);
+    const revealMs = timelineFor(summary.brainId).layerPop.at(-1)! * 1000;
+    barsTimer.current = window.setTimeout(() => {
+      setDisplayed(summary);
+      setComparison(against && against.brainId !== summary.brainId ? against : null);
+    }, revealMs);
   };
 
   const runInference = (
@@ -118,19 +135,40 @@ export default function App() {
       argmax: result.argmax,
       source,
       sampleLabel,
+      brainId,
     };
+    // A NEW input invalidates any cross-brain comparison; a re-fire of the
+    // exact same pixels array (morph landing, attract repeat) keeps it.
+    if (prevPixelsRef.current !== pixels) prevSummaryRef.current = null;
+    prevPixelsRef.current = pixels;
     lastInputRef.current = { pixels, source, sampleLabel };
     sceneRef.current?.setInputPixels(pixels);
     sceneRef.current?.fire(result);
     dispatch({ type: "fire", summary });
-    showResultLater(summary, brainId);
+    showResultLater(summary);
     return result;
   };
 
-  // Attract loop: a shuffled sample digit flows through the network on a timer
+  // Attract loop: a shuffled sample digit flows through the network on a
+  // timer — and every third fire swaps brains and repeats the previous
+  // digit, so the playground demos itself to passersby.
+  const attractFireIndex = useRef(0);
   useEffect(() => {
     if (!attract) return;
+    attractFireIndex.current = 0;
+    let swapTimer = 0;
     const fireSample = () => {
+      const plan = attractPlan(attractFireIndex.current++);
+      if (plan.swapBrain && lastInputRef.current) {
+        dispatch({ type: "selectBrain", id: nextVariantId(stateRef.current.brainId) });
+        const held = lastInputRef.current;
+        // Re-fire the held digit once the ~1.6s morph has landed
+        swapTimer = window.setTimeout(() => {
+          if (stateRef.current.mode !== "attract") return;
+          runInference(held.pixels, held.source, held.sampleLabel);
+        }, 1800);
+        return;
+      }
       const idx = schedulerRef.current!.next();
       runInference(decodeSamplePixels(samples[idx].pixels), "sample", samples[idx].label);
     };
@@ -139,6 +177,7 @@ export default function App() {
     return () => {
       window.clearTimeout(first);
       window.clearInterval(interval);
+      window.clearTimeout(swapTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attract]);
@@ -223,6 +262,9 @@ export default function App() {
             break;
           case "clear":
             handleClear();
+            break;
+          case "cycleBrain":
+            dispatch({ type: "selectBrain", id: nextVariantId(stateRef.current.brainId) });
             break;
           case "penDown":
             padRef.current?.penDown(cmd.x * DRAW_PAD_SIZE, cmd.y * DRAW_PAD_SIZE);
@@ -372,7 +414,9 @@ export default function App() {
       <div className="vignette" />
       <Hud
         mode={state.mode}
+        brainId={state.brainId}
         displayed={displayed}
+        comparison={comparison}
         padReset={padReset}
         padRef={padRef}
         gestureActive={gestureActive}
@@ -381,6 +425,7 @@ export default function App() {
         onDraw={handleDraw}
         onStrokeEnd={handleStrokeEnd}
         onSample={handleSample}
+        onSelectBrain={(id) => dispatch({ type: "selectBrain", id })}
         onClear={handleClear}
       />
       {debugOpen && <DebugPanel dataRef={debugDataRef} />}

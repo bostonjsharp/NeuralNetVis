@@ -28,6 +28,21 @@ export function createAttractScheduler(
   };
 }
 
+/** What the attract loop should do on its Nth fire (0-based). */
+export interface AttractStep {
+  /** Swap to the next brain before firing. */
+  swapBrain: boolean;
+  /** Re-fire the previous digit instead of a fresh one, so the two brains'
+   *  verdicts are directly comparable. */
+  repeatLast: boolean;
+}
+
+/** Every third fire demos the brain-swap feature to passersby. */
+export function attractPlan(fireIndex: number): AttractStep {
+  const swap = fireIndex > 0 && fireIndex % 3 === 0;
+  return { swapBrain: swap, repeatLast: swap };
+}
+
 function shuffle(count: number, rand: () => number): number[] {
   const order = Array.from({ length: count }, (_, i) => i);
   for (let i = order.length - 1; i > 0; i--) {

@@ -233,6 +233,18 @@ export function createScene(
 
   return {
     fire(result) {
+      // The morph advances on rAF frames while callers schedule re-fires on
+      // wall-clock timers — under load a fire can arrive mid-morph. Land the
+      // pending swap first so the scene's topology matches the result.
+      if (morphState) {
+        if (!morphState.swapped) swapSubsystems(morphState.net, morphState.options);
+        const { onDone } = morphState;
+        morphState = null;
+        onDone();
+      }
+      // A result computed for a different topology than the built scene
+      // must never animate — it would index out of every buffer.
+      if (result.activations.length - 1 !== layerCounts.length) return;
       fireResult = result;
       fireStart = elapsed;
       // Normalize each layer's activations to 0..1 for display brightness

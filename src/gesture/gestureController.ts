@@ -6,6 +6,9 @@ import type { GestureState } from "./handTracker";
 export const WAKE_HOLD_MS = 5000;
 /** Arms-crossed dwell before the pad clears. */
 export const CROSS_HOLD_MS = 800;
+/** Raised-hand dwell in interactive mode before the brain cycles — shorter
+ *  than the wake hold: the visitor already learned the raise-and-hold verb. */
+export const BRAIN_HOLD_MS = 2000;
 
 /** Wake progress is quantized to this many steps so ~30fps camera callbacks
  *  produce ~50 HUD renders per fill, not 150. */
@@ -15,6 +18,7 @@ export type GestureCommand =
   | { type: "wake" }
   | { type: "wakeProgress"; value: number }
   | { type: "clear" }
+  | { type: "cycleBrain" }
   | { type: "penDown"; x: number; y: number }
   | { type: "penMove"; x: number; y: number }
   | { type: "penUp" }
@@ -35,6 +39,7 @@ export class GestureController {
   private lastWakeProgress = 0;
   private crossStart: number | null = null;
   private crossFired = false;
+  private brainHoldStart: number | null = null;
   private drawing = false;
   private cursorShown = false;
 
@@ -65,6 +70,7 @@ export class GestureController {
       this.wakeStart = null;
       this.crossStart = null;
       this.crossFired = false;
+      this.brainHoldStart = null;
       setProgress(0);
       liftPen();
       hideCursor();
@@ -78,6 +84,7 @@ export class GestureController {
       hideCursor();
       this.crossStart = null;
       this.crossFired = false;
+      this.brainHoldStart = null;
       if (g.raised) {
         this.wakeStart ??= now;
         const progress = (now - this.wakeStart) / WAKE_HOLD_MS;
@@ -95,7 +102,25 @@ export class GestureController {
     }
 
     this.wakeStart = null;
-    setProgress(0);
+
+    // Raised open hand held in draw/result cycles to the next brain — the
+    // same raise-and-hold verb the visitor learned to wake the wall, with
+    // the same progress ring. A drawing fist or a locked mode never cycles.
+    const canCycle =
+      (mode === "draw" || mode === "result") && g.raised && g.pose !== "fist" && !g.crossed;
+    if (canCycle) {
+      this.brainHoldStart ??= now;
+      const progress = (now - this.brainHoldStart) / BRAIN_HOLD_MS;
+      setProgress(progress);
+      if (progress >= 1) {
+        this.brainHoldStart = null;
+        setProgress(0);
+        commands.push({ type: "cycleBrain" });
+      }
+    } else {
+      this.brainHoldStart = null;
+      setProgress(0);
+    }
 
     // Latched so one held ✕ clears once, not every frame it stays crossed.
     if (g.crossed) {

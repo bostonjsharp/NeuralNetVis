@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 const FACTS = [
-  "This network really is doing the math right now — 13,002 multiplications for every guess.",
+  "This network really is doing the math right now — thousands of multiplications for every guess.",
   "Every line is a weight the network learned by studying 60,000 handwritten digits.",
   "Orange connections excite the next neuron. Blue ones hold it back.",
   "Your drawing becomes just 784 numbers — one brightness per pixel. That's all it sees.",
@@ -11,6 +11,10 @@ const FACTS = [
   "Big AI models work the same way — just with billions of connections instead of thousands.",
   "When it's wrong, it's wrong confidently sometimes. Even small brains hallucinate.",
   "Brighter neurons are more activated — you're watching the network think.",
+  "This wall holds four different brains — watch it swap between them and compare their scores.",
+  "The straight-through brain has no hidden layers. It can only match overall shapes — and it shows.",
+  "More neurons usually means smarter — but every extra layer is a chance to build up bigger ideas.",
+  "Depth beats width for understanding: two small layers outscore one big vote almost every time.",
 ];
 
 const ROTATE_MS = 12_000;

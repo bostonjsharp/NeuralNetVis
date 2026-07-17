@@ -20,10 +20,24 @@ the browser — every glowing pulse you see is real math.
   arm-scale (no finger-counting poses), fist/open only register when
   clearly clenched/splayed, tracking blips get a grace window, and hands
   too small in frame are filtered out. MediaPipe hand tracking runs
-  locally (assets staged into `public/` by `npm install`); with no camera
-  or permission the app is mouse-only.
+  locally (assets staged into `public/` by `npm install`) **in a dedicated
+  worker**, so WASM inference never steals frame budget from the render
+  loop — with a same-logic main-thread fallback if the worker can't start,
+  and mouse-only if there's no camera or permission. `?debug` (or the G
+  key) opens the camera overlay plus a live frame-time/inference readout;
+  `?nocam` disables the vision pipeline for A/B perf comparisons.
 - **Color language:** orange connections excite the next neuron, blue ones
   inhibit; brightness = activation strength.
+- **Architecture playground (brain swap):** four pre-trained brains ship in
+  the app — Straight-through `784→10` (92.2%), Tiny `784→8→10` (93.0%),
+  Classic `784→16→16→10` (95.6%), and Wide `784→32→32→10` (97.3%). Pick a
+  brain card (or hold a raised ✋ for 2s with gestures) and the network
+  visibly *rewires* — the middle implodes and the new topology cascades in
+  while the input plane and output column hold still — then the same digit
+  re-fires through the new brain with a cross-brain comparison verdict
+  ("The Tiny brain said 3 at 54% — this one says 3 at 97%"). The attract
+  loop swaps brains every third fire and repeats the previous digit so the
+  feature demos itself.
 
 ## Run it
 
@@ -37,17 +51,21 @@ npm run build     # static build -> web/ (footron layout)
 Dev viewports letterbox-scale the wall's fixed 2736×1216 canvas. Add
 `?quality=low` for weaker GPUs (quarter-res bloom, no MSAA).
 
-## Retraining the network
+## Retraining the networks
 
 ```bash
-npm run train     # downloads MNIST once into .mnist-cache/, ~2 min pure-Node SGD
+npm run train           # the classic brain (also refreshes samples.json)
+npm run train -- wide   # one variant
+npm run train -- all    # every variant, ~8 min pure-Node SGD
 ```
 
-Exports `src/assets/weights.json` (base64 Float32 matrices) and
-`src/assets/samples.json` (60 test digits, 6 per class, including one
-deliberately ambiguous digit per class for the attract loop). Aborts below
-92% test accuracy. `src/nn/assets.test.ts` cross-checks the committed assets
-against the runtime forward pass so the two can never drift apart.
+Downloads MNIST once into `.mnist-cache/`. Exports
+`src/assets/weights-<id>.json` per variant (base64 Float32 matrices; classic
+also keeps the original `weights.json` name) and `src/assets/samples.json`
+(60 test digits, 6 per class, including one deliberately ambiguous digit per
+class, always picked by the classic net). Each variant has an honest
+per-architecture accuracy gate. `src/nn/assets.test.ts` cross-checks every
+committed brain against the runtime forward pass so they can never drift.
 
 ## Architecture
 

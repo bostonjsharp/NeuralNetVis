@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAttractScheduler } from "./attractLoop";
+import { attractPlan, createAttractScheduler } from "./attractLoop";
 
 function seededRand(seed: number): () => number {
   let a = seed >>> 0;
@@ -38,5 +38,16 @@ describe("attract scheduler", () => {
 
   it("rejects an empty pool", () => {
     expect(() => createAttractScheduler(0)).toThrow();
+  });
+});
+
+describe("attractPlan", () => {
+  it("swaps brains and repeats the digit every third fire, never on the first", () => {
+    expect(attractPlan(0)).toEqual({ swapBrain: false, repeatLast: false });
+    expect(attractPlan(1)).toEqual({ swapBrain: false, repeatLast: false });
+    expect(attractPlan(2)).toEqual({ swapBrain: false, repeatLast: false });
+    expect(attractPlan(3)).toEqual({ swapBrain: true, repeatLast: true });
+    expect(attractPlan(4)).toEqual({ swapBrain: false, repeatLast: false });
+    expect(attractPlan(6)).toEqual({ swapBrain: true, repeatLast: true });
   });
 });

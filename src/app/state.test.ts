@@ -5,6 +5,7 @@ const summary: InferenceSummary = {
   probs: [0.9, 0.1, 0, 0, 0, 0, 0, 0, 0, 0],
   argmax: 0,
   source: "drawn",
+  brainId: "classic",
 };
 
 const at = (
