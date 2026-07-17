@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { STAGE_HEIGHT, STAGE_WIDTH } from "../app/constants";
+import { perf } from "../app/perf";
 import type { ForwardResult } from "../nn/inference";
 import type { Net } from "../nn/weights";
 import { CameraRig, type CameraMode } from "./CameraRig";
@@ -119,6 +120,7 @@ export function createScene(
   function frame() {
     raf = requestAnimationFrame(frame);
     const dt = Math.min(clock.getDelta(), 0.1);
+    perf.recordFrame(dt * 1000);
     elapsed += dt;
     const tSinceFire = elapsed - fireStart;
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { perf } from "../app/perf";
 import { RAISE_LINE, WRIST } from "../gesture/handGesture";
 import type { HandDebugFrame } from "../gesture/handTracker";
 
@@ -39,11 +40,26 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
+  const perfRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let raf = 0;
+    let drawCount = 0;
     const draw = () => {
       raf = requestAnimationFrame(draw);
+      // Render-loop health, refreshed twice a second. The long-frame counters
+      // cover the buffer's ~4s window — fire the cinematic and watch whether
+      // they climb, then compare against ?nocam.
+      if (drawCount++ % 30 === 0 && perfRef.current) {
+        const s = perf.snapshot();
+        const markText = Object.entries(s.marks)
+          .map(([name, m]) => `${name} ${m.last.toFixed(1)}ms (worst ${m.worst.toFixed(0)})`)
+          .join(" · ");
+        perfRef.current.textContent =
+          `frame p50 ${s.p50.toFixed(1)}ms · p95 ${s.p95.toFixed(1)}ms · worst ${s.worst.toFixed(0)}ms` +
+          `   |   >16.7ms: ${s.over17}  >25ms: ${s.over25} (of ${s.frames})` +
+          (markText ? `   |   ${markText}` : "");
+      }
       const { video, frame } = dataRef.current;
       const canvas = canvasRef.current;
       const status = statusRef.current;
@@ -157,6 +173,7 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
       <div ref={statusRef} className="debug-panel__status">
         waiting for camera…
       </div>
+      <div ref={perfRef} className="debug-panel__status" />
     </div>
   );
 }

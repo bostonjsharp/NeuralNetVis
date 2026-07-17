@@ -10,6 +10,12 @@ const representatives = Array.from({ length: 10 }, (_, digit) =>
   samples.findIndex((s) => s.label === digit)
 );
 
+/** Decoded once at module load: stable identities keep the Thumbnail
+ *  effects from re-painting all 10 canvases on every Hud re-render. */
+const thumbnailPixels = representatives.map((sampleIndex) =>
+  decodeSamplePixels(samples[sampleIndex].pixels)
+);
+
 interface SampleStripProps {
   disabled: boolean;
   onPick: (sampleIndex: number) => void;
@@ -27,7 +33,7 @@ export default function SampleStrip({ disabled, onPick }: SampleStripProps) {
           onClick={() => onPick(sampleIndex)}
           aria-label={`try a handwritten ${digit}`}
         >
-          <Thumbnail pixels={decodeSamplePixels(samples[sampleIndex].pixels)} />
+          <Thumbnail pixels={thumbnailPixels[digit]} />
         </button>
       ))}
     </div>

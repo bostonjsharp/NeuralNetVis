@@ -53,6 +53,8 @@ export default function App() {
   const [debugOpen, setDebugOpen] = useState(
     () => new URLSearchParams(window.location.search).has("debug")
   );
+  const debugOpenRef = useRef(debugOpen);
+  debugOpenRef.current = debugOpen;
   const debugDataRef = useRef<DebugData>({ video: null, frame: null });
   const barsTimer = useRef(0);
   const cinematicTimer = useRef(0);
@@ -168,12 +170,22 @@ export default function App() {
   // in GestureController (pure, unit-tested); this effect only interprets
   // its commands against dispatch/DrawPad.
   useEffect(() => {
+    // ?nocam: A/B lever for hunting render hitches — runs the exact same app
+    // with the vision pipeline (and its main-thread cost) absent.
+    if (new URLSearchParams(window.location.search).has("nocam")) return;
     let dispose: (() => void) | undefined;
     let cancelled = false;
     const controller = new GestureController();
+    // Idle-reset only needs to know a hand exists at second granularity —
+    // dispatching per camera frame ran the listener 60×/s for nothing.
+    let lastActivityDispatch = 0;
     const onGesture = (g: GestureState) => {
-      if (g.present) window.dispatchEvent(new Event("gesture-activity"));
-      for (const cmd of controller.update(g, stateRef.current.mode, performance.now())) {
+      const now = performance.now();
+      if (g.present && now - lastActivityDispatch > 1000) {
+        lastActivityDispatch = now;
+        window.dispatchEvent(new Event("gesture-activity"));
+      }
+      for (const cmd of controller.update(g, stateRef.current.mode, now)) {
         switch (cmd.type) {
           case "wake":
             dispatch({ type: "userActive" });
@@ -210,13 +222,14 @@ export default function App() {
     let retryTimer = 0;
     const attempt = () => {
       startHandTracking(onGesture, {
-      attachVideo: (video) => {
-        debugDataRef.current.video = video;
-      },
-      onFrame: (frame) => {
-        debugDataRef.current.frame = frame;
-      },
-    })
+        attachVideo: (video) => {
+          debugDataRef.current.video = video;
+        },
+        wantFrames: () => debugOpenRef.current,
+        onFrame: (frame) => {
+          debugDataRef.current.frame = frame;
+        },
+      })
         .then((stop) => {
           if (cancelled) stop();
           else {
