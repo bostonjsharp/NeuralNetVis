@@ -7,15 +7,17 @@ import { CameraRig, type CameraMode } from "./CameraRig";
 import { ConnectionMesh } from "./ConnectionMesh";
 import { installContextLossRecovery } from "./contextLossRecovery";
 import {
+  clamp01,
   inputRamp,
   makeFireTimeline,
   neuronPop,
   neuronReveal,
+  smoothstep,
   stageGlow,
   winnerFlare,
 } from "./fire";
 import { InputPlane } from "./InputPlane";
-import { NetworkLayout, buildLayout } from "./NetworkLayout";
+import { buildLayout, type LayoutOptions, type NetworkLayout } from "./NetworkLayout";
 import { NeuronField } from "./NeuronField";
 import { OutputGlyphs } from "./OutputGlyphs";
 import { createPostFx, BLOOM_BASE_STRENGTH } from "./postfx";
@@ -29,8 +31,20 @@ export interface SceneApi {
   setMode(mode: CameraMode): void;
   /** Live-mirror pixels onto the input plane (e.g. while drawing). */
   setInputPixels(pixels: Float32Array): void;
+  /**
+   * Morph the network into a different brain: the middle implodes, the
+   * subsystems rebuild for the new topology, the new middle cascades in.
+   * The input plane and output column never move. Calls onDone when the
+   * reshape has finished (≈1.6s).
+   */
+  setNet(net: Net, options: LayoutOptions, onDone: () => void): void;
   dispose(): void;
 }
+
+/** Old hidden layers implode… */
+const MORPH_OUT_S = 0.55;
+/** …then the new topology cascades in, done by this total. */
+const MORPH_TOTAL_S = 1.6;
 
 /**
  * The only module that touches WebGL. Owns the renderer, the render loop,
@@ -42,8 +56,8 @@ export function createScene(
   net: Net,
   quality: "high" | "low" = "high"
 ): SceneApi {
-  const layout: NetworkLayout = buildLayout(net);
-  const fire = makeFireTimeline(layout.edges.length);
+  let layout: NetworkLayout = buildLayout(net);
+  let fire = makeFireTimeline(layout.edges.length);
 
   // Three handles a context loss that restores; this reboots the page when
   // the driver never restores it (the unattended-wall failure mode).
@@ -63,9 +77,11 @@ export function createScene(
 
   const starfield = new Starfield();
   const inputPlane = new InputPlane();
-  const neurons = new NeuronField(layout);
-  const connections = new ConnectionMesh(layout);
-  const pulses = new PulseSystem(layout, fire);
+  let neurons = new NeuronField(layout);
+  let connections = new ConnectionMesh(layout);
+  let pulses = new PulseSystem(layout, fire);
+  // The output column is position-identical across every brain — the glyphs
+  // are built once and survive all swaps untouched.
   const glyphs = new OutputGlyphs(layout);
   const flare = new WinnerFlare();
   scene.add(starfield.points, inputPlane.mesh, connections.lines, neurons.mesh);
@@ -74,18 +90,58 @@ export function createScene(
   const rig = new CameraRig(camera);
   const post = createPostFx(renderer, scene, camera, STAGE_WIDTH, STAGE_HEIGHT, quality);
 
-  const layerCounts = layout.layerPositions.map((p) => p.length / 3);
+  let layerCounts = layout.layerPositions.map((p) => p.length / 3);
 
   // Active cinematic (persists after completion so the last result stays lit)
   let fireStart = -1e9;
   let fireResult: ForwardResult | null = null;
   let normalized: Float32Array[] = [];
 
+  // Active brain-swap morph
+  let morphState: {
+    start: number;
+    net: Net;
+    options: LayoutOptions;
+    onDone: () => void;
+    swapped: boolean;
+  } | null = null;
+
+  function swapSubsystems(nextNet: Net, options: LayoutOptions): void {
+    scene.remove(neurons.mesh, connections.lines, pulses.points);
+    neurons.dispose();
+    connections.dispose();
+    pulses.dispose();
+    layout = buildLayout(nextNet, options);
+    fire = makeFireTimeline(layout.edges.length);
+    neurons = new NeuronField(layout);
+    connections = new ConnectionMesh(layout);
+    pulses = new PulseSystem(layout, fire);
+    scene.add(connections.lines, neurons.mesh, pulses.points);
+    layerCounts = layout.layerPositions.map((p) => p.length / 3);
+  }
+
   const clock = new THREE.Clock();
   let elapsed = 0;
   let raf = 0;
 
-  function updateNeurons(tSinceFire: number) {
+  /** Hidden-neuron scale during the morph: implode together, cascade back in. */
+  function morphScale(
+    morph: { phase: "out" | "in"; u: number } | null,
+    layer: number,
+    i: number,
+    count: number
+  ): number {
+    if (!morph || layer === layerCounts.length - 1) return 1; // output persists
+    if (morph.phase === "out") return 1 - smoothstep(0, 1, morph.u);
+    // Reuse the reveal-cascade feel: top of the column leads the reweave
+    const stagger = (i / Math.max(1, count - 1)) * 0.45;
+    return smoothstep(0, 0.55, morph.u - stagger);
+  }
+
+  function updateNeurons(
+    tSinceFire: number,
+    morph: { phase: "out" | "in"; u: number } | null
+  ) {
     const flareEnv = fireResult ? winnerFlare(fire, tSinceFire) : 0;
     const lastLayer = layerCounts.length - 1;
     for (let layer = 0; layer < layerCounts.length; layer++) {
@@ -113,7 +169,7 @@ export function createScene(
         const r = brightness * (0.55 + 0.65 * warmth);
         const g = brightness * (0.72 + 0.28 * warmth);
         const b = brightness * (1.0 - 0.45 * warmth);
-        neurons.setInstance(instance, r, g, b, scale);
+        neurons.setInstance(instance, r, g, b, scale * morphScale(morph, layer, i, count));
       }
     }
     neurons.commit();
@@ -127,17 +183,43 @@ export function createScene(
     elapsed += dt;
     const tSinceFire = elapsed - fireStart;
 
+    // Brain-swap morph: implode → swap subsystems at the midpoint → reweave
+    let morph: { phase: "out" | "in"; u: number } | null = null;
+    let edgeFade = 1;
+    if (morphState) {
+      const mt = elapsed - morphState.start;
+      if (mt < MORPH_OUT_S) {
+        morph = { phase: "out", u: mt / MORPH_OUT_S };
+        edgeFade = 1 - morph.u;
+      } else {
+        if (!morphState.swapped) {
+          swapSubsystems(morphState.net, morphState.options);
+          morphState.swapped = true;
+        }
+        morph = { phase: "in", u: clamp01((mt - MORPH_OUT_S) / (MORPH_TOTAL_S - MORPH_OUT_S)) };
+        edgeFade = morph.u;
+        if (mt >= MORPH_TOTAL_S) {
+          const { onDone } = morphState;
+          morphState = null;
+          morph = null;
+          edgeFade = 1;
+          onDone();
+        }
+      }
+    }
+
     rig.update(elapsed, dt);
     starfield.update(elapsed);
     pulses.update(elapsed);
     inputPlane.setBrightness(fireResult ? inputRamp(tSinceFire) : 1);
+    connections.setFade(edgeFade);
     // Stage 0's many lines share one small screen region — halve its glow lift
     connections.setStageGlow(
       layout.edges.map((_, stage) =>
         fireResult ? (stage === 0 ? 0.5 : 1) * stageGlow(fire, tSinceFire, stage) : 0
       )
     );
-    const flareEnv = updateNeurons(tSinceFire);
+    const flareEnv = updateNeurons(tSinceFire, morph);
     const outputReveal = fireResult
       ? neuronReveal(fire, tSinceFire, layerCounts.length - 1, 0, 1)
       : 0;
@@ -170,6 +252,18 @@ export function createScene(
     },
     setMode(mode) {
       rig.setMode(mode);
+    },
+    setNet(nextNet, options, onDone) {
+      if (morphState) {
+        // Land the pending morph before starting over — an orphaned onDone
+        // would strand the app's state machine in "morph" forever.
+        if (!morphState.swapped) swapSubsystems(morphState.net, morphState.options);
+        morphState.onDone();
+      }
+      // A lit result about the old brain must not survive the swap
+      fireResult = null;
+      fireStart = -1e9;
+      morphState = { start: elapsed, net: nextNet, options, onDone, swapped: false };
     },
     setInputPixels(pixels) {
       inputPlane.setPixels(pixels);

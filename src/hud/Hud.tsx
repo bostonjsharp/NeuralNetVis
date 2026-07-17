@@ -37,7 +37,7 @@ export default function Hud({
   onClear,
 }: HudProps) {
   const attract = mode === "attract";
-  const busy = mode === "infer";
+  const busy = mode === "infer" || mode === "morph";
   return (
     <div className={`hud${attract ? " hud--attract" : ""}`}>
       <Labels />
@@ -86,7 +86,9 @@ export default function Hud({
               onStrokeEnd={onStrokeEnd}
             />
             <div className="hud-panel__side">
-              <div className="hud-panel__title">{busy ? "Thinking…" : "Draw a digit 0–9"}</div>
+              <div className="hud-panel__title">
+                {mode === "morph" ? "Rewiring…" : busy ? "Thinking…" : "Draw a digit 0–9"}
+              </div>
               {gestureActive && !busy && (
                 <div className="hud-panel__gesture">
                   ✊ draws · ✋ lifts the pen · cross your arms ✕ to clear

@@ -1,6 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import samplesJson from "./assets/samples.json";
-import weightsJson from "./assets/weights.json";
 import {
   ATTRACT_FIRE_INTERVAL_MS,
   AUTO_FIRE_DELAY_MS,
@@ -19,21 +18,17 @@ import DebugPanel, { type DebugData } from "./hud/DebugPanel";
 import type { DrawPadHandle } from "./hud/DrawPad";
 import { forwardPass, type ForwardResult } from "./nn/inference";
 import { downsampleTo28, preprocessDrawing } from "./nn/preprocess";
-import {
-  decodeSamplePixels,
-  loadNet,
-  type SamplesJson,
-  type WeightsJson,
-} from "./nn/weights";
-import { FIRE, FIRE_TOTAL_MS } from "./scene/fire";
+import { DEFAULT_VARIANT_ID, getVariant, nextVariantId } from "./nn/variants";
+import { decodeSamplePixels, type SamplesJson } from "./nn/weights";
+import { makeFireTimeline } from "./scene/fire";
 import { createScene, type SceneApi } from "./scene/SceneManager";
 import { useIdleReset } from "./useIdleReset";
 
-const net = loadNet(weightsJson as WeightsJson);
 const { samples } = samplesJson as SamplesJson;
 
-/** When the HUD bars land, synced to the cinematic's output reveal. */
-const OUTPUT_REVEAL_MS = FIRE.layerPop[2] * 1000;
+/** Cinematic timing depends on how many pulse stages the active brain has. */
+const timelineFor = (brainId: string) =>
+  makeFireTimeline(getVariant(brainId).net.shape.length - 1);
 
 export default function App() {
   const [state, dispatch] = useReducer(reduce, initialState);
@@ -59,6 +54,12 @@ export default function App() {
   const barsTimer = useRef(0);
   const cinematicTimer = useRef(0);
   const autoFireTimer = useRef(0);
+  /** The most recent classified input — re-fired through a freshly swapped brain. */
+  const lastInputRef = useRef<{
+    pixels: Float32Array;
+    source: InferenceSummary["source"];
+    sampleLabel?: number;
+  } | null>(null);
 
   const attract = state.mode === "attract";
 
@@ -66,21 +67,43 @@ export default function App() {
   useEffect(() => {
     const quality =
       new URLSearchParams(window.location.search).get("quality") === "low" ? "low" : "high";
-    sceneRef.current = createScene(canvasRef.current!, net, quality);
+    sceneRef.current = createScene(
+      canvasRef.current!,
+      getVariant(DEFAULT_VARIANT_ID).net,
+      quality
+    );
     return () => {
       sceneRef.current?.dispose();
       sceneRef.current = null;
     };
   }, []);
 
+  // Brain swap: cancel every pending timer, clear the verdict, and hand the
+  // scene the new net; morphDone advances the state machine when it lands.
+  const prevBrainRef = useRef(state.brainId);
+  useEffect(() => {
+    if (prevBrainRef.current === state.brainId) return;
+    prevBrainRef.current = state.brainId;
+    window.clearTimeout(autoFireTimer.current);
+    window.clearTimeout(cinematicTimer.current);
+    window.clearTimeout(barsTimer.current);
+    setDisplayed(null);
+    const variant = getVariant(state.brainId);
+    sceneRef.current?.setNet(variant.net, { inputTopK: variant.inputTopK }, () =>
+      dispatch({ type: "morphDone" })
+    );
+  }, [state.brainId]);
+
   useEffect(() => {
     sceneRef.current?.setMode(attract ? "attract" : "interactive");
   }, [attract]);
 
-  const showResultLater = (summary: InferenceSummary) => {
+  const showResultLater = (summary: InferenceSummary, brainId: string) => {
     window.clearTimeout(barsTimer.current);
     setDisplayed(null);
-    barsTimer.current = window.setTimeout(() => setDisplayed(summary), OUTPUT_REVEAL_MS);
+    // The HUD bars land in sync with the cinematic's output reveal
+    const revealMs = timelineFor(brainId).layerPop.at(-1)! * 1000;
+    barsTimer.current = window.setTimeout(() => setDisplayed(summary), revealMs);
   };
 
   const runInference = (
@@ -88,17 +111,19 @@ export default function App() {
     source: InferenceSummary["source"],
     sampleLabel?: number
   ): ForwardResult => {
-    const result = forwardPass(net, pixels);
+    const brainId = stateRef.current.brainId;
+    const result = forwardPass(getVariant(brainId).net, pixels);
     const summary: InferenceSummary = {
       probs: Array.from(result.probs),
       argmax: result.argmax,
       source,
       sampleLabel,
     };
+    lastInputRef.current = { pixels, source, sampleLabel };
     sceneRef.current?.setInputPixels(pixels);
     sceneRef.current?.fire(result);
     dispatch({ type: "fire", summary });
-    showResultLater(summary);
+    showResultLater(summary, brainId);
     return result;
   };
 
@@ -149,6 +174,9 @@ export default function App() {
     window.clearTimeout(barsTimer.current);
     setPadReset((k) => k + 1);
     setDisplayed(null);
+    // The attract loop's last sample must not re-fire into a fresh visitor's
+    // empty pad if they swap brains before drawing anything.
+    lastInputRef.current = null;
     sceneRef.current?.setInputPixels(new Float32Array(784));
     return () => {
       window.clearTimeout(autoFireTimer.current);
@@ -258,14 +286,28 @@ export default function App() {
     source: InferenceSummary["source"],
     sampleLabel?: number
   ) => {
-    if (stateRef.current.mode === "infer" || stateRef.current.mode === "attract") return;
+    const { mode } = stateRef.current;
+    if (mode === "infer" || mode === "attract" || mode === "morph") return;
     runInference(pixels, source, sampleLabel);
     window.clearTimeout(cinematicTimer.current);
     cinematicTimer.current = window.setTimeout(
       () => dispatch({ type: "cinematicDone" }),
-      FIRE_TOTAL_MS
+      timelineFor(stateRef.current.brainId).total * 1000
     );
   };
+
+  // The comparison beat: when a morph lands (morph → draw) with an input
+  // still on the pad, the same digit immediately re-fires through the new
+  // brain so the visitor sees the confidence difference.
+  const prevModeRef = useRef(state.mode);
+  useEffect(() => {
+    const prev = prevModeRef.current;
+    prevModeRef.current = state.mode;
+    if (prev === "morph" && state.mode === "draw" && lastInputRef.current) {
+      const { pixels, source, sampleLabel } = lastInputRef.current;
+      fireInteractive(pixels, source, sampleLabel);
+    }
+  });
 
   const handleStrokeStart = () => {
     window.clearTimeout(autoFireTimer.current);
@@ -295,20 +337,26 @@ export default function App() {
     fireInteractive(decodeSamplePixels(sample.pixels), "sample", sample.label);
   };
 
-  // Dev-only: G toggles the gesture debug overlay (also via ?debug)
+  // Dev-only: G toggles the gesture debug overlay (also via ?debug);
+  // B cycles through the brain variants.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "g" || e.key === "G") setDebugOpen((open) => !open);
+      if (e.key === "b" || e.key === "B") {
+        dispatch({ type: "selectBrain", id: nextVariantId(stateRef.current.brainId) });
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const handleClear = () => {
-    if (stateRef.current.mode === "infer") return;
+    const { mode } = stateRef.current;
+    if (mode === "infer" || mode === "morph") return;
     window.clearTimeout(autoFireTimer.current);
     setPadReset((k) => k + 1);
     setDisplayed(null);
+    lastInputRef.current = null;
     sceneRef.current?.setInputPixels(new Float32Array(784));
     dispatch({ type: "clear" });
   };

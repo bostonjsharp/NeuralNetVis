@@ -7,14 +7,20 @@ const summary: InferenceSummary = {
   source: "drawn",
 };
 
-const at = (mode: AppState["mode"], current: InferenceSummary | null = null): AppState => ({
+const at = (
+  mode: AppState["mode"],
+  current: InferenceSummary | null = null,
+  brainId = "classic"
+): AppState => ({
   mode,
   current,
+  brainId,
 });
 
 describe("app state machine", () => {
-  it("starts in attract", () => {
+  it("starts in attract with the classic brain", () => {
     expect(initialState.mode).toBe("attract");
+    expect(initialState.brainId).toBe("classic");
   });
 
   it("attract → draw on user activity", () => {
@@ -59,7 +65,7 @@ describe("app state machine", () => {
   });
 
   it("idleTimeout returns every interactive mode to attract", () => {
-    for (const mode of ["draw", "infer", "result"] as const) {
+    for (const mode of ["draw", "infer", "result", "morph"] as const) {
       expect(reduce(at(mode, summary), { type: "idleTimeout" })).toEqual(at("attract"));
     }
   });
@@ -67,5 +73,56 @@ describe("app state machine", () => {
   it("idleTimeout in attract is a no-op (no state churn)", () => {
     const attract = at("attract", summary);
     expect(reduce(attract, { type: "idleTimeout" })).toBe(attract);
+  });
+});
+
+describe("brain swapping", () => {
+  it("selectBrain in draw starts a morph to the new brain, clearing the verdict", () => {
+    const next = reduce(at("draw", summary), { type: "selectBrain", id: "wide" });
+    expect(next).toEqual(at("morph", null, "wide"));
+  });
+
+  it("selectBrain in result starts a morph", () => {
+    const next = reduce(at("result", summary), { type: "selectBrain", id: "tiny" });
+    expect(next).toEqual(at("morph", null, "tiny"));
+  });
+
+  it("selectBrain in attract swaps in place without leaving attract", () => {
+    const next = reduce(at("attract", summary), { type: "selectBrain", id: "linear" });
+    expect(next).toEqual(at("attract", null, "linear"));
+  });
+
+  it("selectBrain is ignored mid-cinematic and mid-morph", () => {
+    const infer = at("infer", summary);
+    expect(reduce(infer, { type: "selectBrain", id: "wide" })).toBe(infer);
+    const morph = at("morph", null, "tiny");
+    expect(reduce(morph, { type: "selectBrain", id: "wide" })).toBe(morph);
+  });
+
+  it("selecting the already-active brain is a no-op", () => {
+    const draw = at("draw", summary);
+    expect(reduce(draw, { type: "selectBrain", id: "classic" })).toBe(draw);
+  });
+
+  it("morphDone lands in draw, ready for the re-fire", () => {
+    const next = reduce(at("morph", null, "wide"), { type: "morphDone" });
+    expect(next).toEqual(at("draw", null, "wide"));
+  });
+
+  it("morphDone outside morph is ignored", () => {
+    const draw = at("draw");
+    expect(reduce(draw, { type: "morphDone" })).toBe(draw);
+  });
+
+  it("morph locks drawing input", () => {
+    const morph = at("morph", null, "wide");
+    expect(reduce(morph, { type: "fire", summary })).toBe(morph);
+    expect(reduce(morph, { type: "strokeStart" })).toBe(morph);
+    expect(reduce(morph, { type: "clear" })).toBe(morph);
+  });
+
+  it("idleTimeout mid-morph returns to attract keeping the chosen brain", () => {
+    const next = reduce(at("morph", null, "wide"), { type: "idleTimeout" });
+    expect(next).toEqual(at("attract", null, "wide"));
   });
 });

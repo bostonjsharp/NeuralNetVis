@@ -48,7 +48,11 @@ export class ConnectionMesh {
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      uniforms: { uStageGlow: { value: new THREE.Vector3(0, 0, 0) } },
+      uniforms: {
+        uStageGlow: { value: new THREE.Vector3(0, 0, 0) },
+        // Whole-mesh fade for the brain-swap morph (edges dissolve/reweave)
+        uFade: { value: 1 },
+      },
       vertexShader: /* glsl */ `
         attribute float aWeight;
         attribute vec3 aStageMask;
@@ -62,6 +66,7 @@ export class ConnectionMesh {
         }
       `,
       fragmentShader: /* glsl */ `
+        uniform float uFade;
         varying float vWeight;
         varying float vGlow;
         void main() {
@@ -69,7 +74,7 @@ export class ConnectionMesh {
           vec3 cool = vec3(0.25, 0.72, 1.0);
           vec3 tint = vWeight >= 0.0 ? warm : cool;
           float mag = abs(vWeight);
-          float alpha = (0.07 + 0.33 * mag) * (1.0 + 1.1 * vGlow);
+          float alpha = (0.07 + 0.33 * mag) * (1.0 + 1.1 * vGlow) * uFade;
           gl_FragColor = vec4(tint * (0.5 + 0.8 * vGlow), alpha * mag);
         }
       `,
@@ -87,6 +92,11 @@ export class ConnectionMesh {
       glows[1] ?? 0,
       glows[2] ?? 0
     );
+  }
+
+  /** 0..1 whole-mesh opacity, for the morph's dissolve/reweave. */
+  setFade(fade: number): void {
+    this.material.uniforms.uFade.value = fade;
   }
 
   dispose(): void {
