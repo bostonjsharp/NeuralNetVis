@@ -11,7 +11,7 @@ export class OutputGlyphs {
   private readonly sprites: THREE.Sprite[] = [];
 
   constructor(layout: NetworkLayout) {
-    const positions = layout.layerPositions[2];
+    const positions = layout.layerPositions[layout.layerPositions.length - 1];
     for (let digit = 0; digit < 10; digit++) {
       const sprite = new THREE.Sprite(
         new THREE.SpriteMaterial({

@@ -1,11 +1,16 @@
-// Trains the 784→16→16→10 MLP the app visualizes and exports its weights.
+// Trains the MLP variants the app visualizes and exports their weights.
 //
-//   node scripts/train-mnist.mjs
+//   node scripts/train-mnist.mjs            # classic (today's default)
+//   node scripts/train-mnist.mjs wide       # one variant
+//   node scripts/train-mnist.mjs all        # every variant
 //
 // Downloads MNIST once into .mnist-cache/ (gitignored), trains with plain
 // seeded SGD, and writes the committed runtime assets:
-//   src/assets/weights.json  — base64 Float32 W/b per layer + metadata
-//   src/assets/samples.json  — 60 test digits (6 per class) for the attract loop
+//   src/assets/weights-<id>.json — base64 Float32 W/b per layer + metadata
+//   src/assets/weights.json      — the classic variant, kept under its
+//                                  original name (the app's default import)
+//   src/assets/samples.json      — 60 test digits (6 per class) for the
+//                                  attract loop, picked by the classic net
 //
 // The app never trains or downloads anything; these assets are the contract.
 
@@ -28,6 +33,18 @@ const FILES = {
   trainLabels: "train-labels-idx1-ubyte.gz",
   testImages: "t10k-images-idx3-ubyte.gz",
   testLabels: "t10k-labels-idx1-ubyte.gz",
+};
+
+/**
+ * The brains the exhibit can swap between. `minAcc` is an honest floor per
+ * architecture — a linear softmax simply cannot reach the classic bar, and
+ * that gap is the whole point of showing it.
+ */
+const VARIANTS = {
+  linear: { shape: [784, 10], minAcc: 0.9, label: "Straight-through" },
+  tiny: { shape: [784, 8, 10], minAcc: 0.9, label: "Tiny" },
+  classic: { shape: [784, 16, 16, 10], minAcc: 0.92, label: "Classic" },
+  wide: { shape: [784, 32, 32, 10], minAcc: 0.95, label: "Wide" },
 };
 
 // ---------------------------------------------------------------- download
@@ -88,8 +105,6 @@ function parseIdxLabels(path) {
 
 // ------------------------------------------------------------------- model
 
-const SHAPE = [784, 16, 16, 10];
-
 function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -102,10 +117,10 @@ function mulberry32(seed) {
 }
 
 /** Layers as { W: Float32Array(out*in) row-major [out][in], b: Float32Array(out) }. */
-function initNet(rand) {
+function initNet(shape, rand) {
   const layers = [];
-  for (let l = 0; l < SHAPE.length - 1; l++) {
-    const [nIn, nOut] = [SHAPE[l], SHAPE[l + 1]];
+  for (let l = 0; l < shape.length - 1; l++) {
+    const [nIn, nOut] = [shape[l], shape[l + 1]];
     const W = new Float32Array(nOut * nIn);
     const std = Math.sqrt(2 / nIn); // He init for ReLU
     for (let i = 0; i < W.length; i++) {
@@ -123,15 +138,16 @@ function initNet(rand) {
  * Forward + backward for one sample; accumulates gradients in-place.
  * Returns 1 if prediction was correct (for train accuracy logging).
  */
-function trainSample(layers, grads, acts, x, label) {
+function trainSample(shape, layers, grads, acts, x, label) {
   const L = layers.length;
+  const nClasses = shape[shape.length - 1];
   acts[0].set(x);
   // forward: ReLU on hidden layers, raw logits on the last
   for (let l = 0; l < L; l++) {
     const { W, b } = layers[l];
     const [aIn, aOut] = [acts[l], acts[l + 1]];
-    const nIn = SHAPE[l];
-    for (let o = 0; o < SHAPE[l + 1]; o++) {
+    const nIn = shape[l];
+    for (let o = 0; o < shape[l + 1]; o++) {
       let sum = b[o];
       const row = o * nIn;
       for (let i = 0; i < nIn; i++) sum += W[row + i] * aIn[i];
@@ -141,20 +157,20 @@ function trainSample(layers, grads, acts, x, label) {
   const logits = acts[L];
   let maxLogit = -Infinity;
   let argmax = 0;
-  for (let o = 0; o < 10; o++) {
+  for (let o = 0; o < nClasses; o++) {
     if (logits[o] > maxLogit) {
       maxLogit = logits[o];
       argmax = o;
     }
   }
   let expSum = 0;
-  const delta = new Float32Array(10);
-  for (let o = 0; o < 10; o++) {
+  const delta = new Float32Array(nClasses);
+  for (let o = 0; o < nClasses; o++) {
     delta[o] = Math.exp(logits[o] - maxLogit);
     expSum += delta[o];
   }
   // softmax cross-entropy gradient: p - onehot
-  for (let o = 0; o < 10; o++) delta[o] = delta[o] / expSum - (o === label ? 1 : 0);
+  for (let o = 0; o < nClasses; o++) delta[o] = delta[o] / expSum - (o === label ? 1 : 0);
 
   // backward
   let dOut = delta;
@@ -162,8 +178,8 @@ function trainSample(layers, grads, acts, x, label) {
     const { W } = layers[l];
     const g = grads[l];
     const aIn = acts[l];
-    const nIn = SHAPE[l];
-    const nOut = SHAPE[l + 1];
+    const nIn = shape[l];
+    const nOut = shape[l + 1];
     const dIn = l > 0 ? new Float32Array(nIn) : null;
     for (let o = 0; o < nOut; o++) {
       const d = dOut[o];
@@ -185,14 +201,15 @@ function trainSample(layers, grads, acts, x, label) {
   return argmax === label ? 1 : 0;
 }
 
-function predict(layers, acts, x) {
+function predict(shape, layers, acts, x) {
   acts[0].set(x);
   const L = layers.length;
+  const nClasses = shape[shape.length - 1];
   for (let l = 0; l < L; l++) {
     const { W, b } = layers[l];
     const [aIn, aOut] = [acts[l], acts[l + 1]];
-    const nIn = SHAPE[l];
-    for (let o = 0; o < SHAPE[l + 1]; o++) {
+    const nIn = shape[l];
+    for (let o = 0; o < shape[l + 1]; o++) {
       let sum = b[o];
       const row = o * nIn;
       for (let i = 0; i < nIn; i++) sum += W[row + i] * aIn[i];
@@ -201,25 +218,19 @@ function predict(layers, acts, x) {
   }
   const logits = acts[L];
   let best = 0;
-  for (let o = 1; o < 10; o++) if (logits[o] > logits[best]) best = o;
+  for (let o = 1; o < nClasses; o++) if (logits[o] > logits[best]) best = o;
   return best;
 }
 
-// -------------------------------------------------------------------- main
+// ---------------------------------------------------------------- training
 
-async function main() {
-  const paths = {};
-  for (const [key, name] of Object.entries(FILES)) paths[key] = await ensureFile(name);
-
-  const train = parseIdxImages(paths.trainImages);
-  const trainLabels = parseIdxLabels(paths.trainLabels);
-  const test = parseIdxImages(paths.testImages);
-  const testLabels = parseIdxLabels(paths.testLabels);
-  console.log(`train ${train.n}, test ${test.n}`);
+function trainVariant(id, { shape, minAcc, label }, data) {
+  const { train, trainLabels, test, testLabels } = data;
+  console.log(`\n=== ${id} [${shape.join("→")}] ===`);
 
   const rand = mulberry32(0x5eed);
-  const layers = initNet(rand);
-  const acts = SHAPE.map((n) => new Float32Array(n));
+  const layers = initNet(shape, rand);
+  const acts = shape.map((n) => new Float32Array(n));
 
   const EPOCHS = 20;
   const BATCH = 64;
@@ -230,7 +241,7 @@ async function main() {
     let correct = 0;
     for (let s = 0; s < test.n; s++) {
       for (let i = 0; i < 784; i++) x[i] = test.pixels[s * 784 + i] / 255;
-      if (predict(layers, acts, x) === testLabels[s]) correct++;
+      if (predict(shape, layers, acts, x) === testLabels[s]) correct++;
     }
     return correct / test.n;
   };
@@ -257,7 +268,7 @@ async function main() {
       for (let k = 0; k < count; k++) {
         const s = order[start + k];
         for (let i = 0; i < 784; i++) x[i] = train.pixels[s * 784 + i] / 255;
-        trainCorrect += trainSample(layers, grads, acts, x, trainLabels[s]);
+        trainCorrect += trainSample(shape, layers, grads, acts, x, trainLabels[s]);
       }
       const scale = lr / count;
       for (let l = 0; l < layers.length; l++) {
@@ -274,31 +285,50 @@ async function main() {
     );
   }
 
-  if (acc < 0.92) {
-    throw new Error(`test accuracy ${(acc * 100).toFixed(2)}% is below the 92% bar — not exporting`);
+  if (acc < minAcc) {
+    throw new Error(
+      `${id}: test accuracy ${(acc * 100).toFixed(2)}% is below the ` +
+        `${(minAcc * 100).toFixed(0)}% bar — not exporting`
+    );
   }
 
-  // ---- export weights.json
+  // ---- export weights-<id>.json (classic also keeps the original filename)
   const b64 = (arr) => Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toString("base64");
   mkdirSync(ASSETS, { recursive: true });
   const weightsJson = {
-    shape: SHAPE,
+    id,
+    label,
+    shape,
     testAccuracy: Number(acc.toFixed(4)),
     trainedAt: new Date().toISOString().slice(0, 10),
     layers: layers.map(({ W, b }) => ({ W: b64(W), b: b64(b) })),
   };
-  writeFileSync(join(ASSETS, "weights.json"), JSON.stringify(weightsJson));
-  console.log(`wrote src/assets/weights.json (test accuracy ${(acc * 100).toFixed(2)}%)`);
+  const json = JSON.stringify(weightsJson);
+  writeFileSync(join(ASSETS, `weights-${id}.json`), json);
+  console.log(`wrote src/assets/weights-${id}.json (test accuracy ${(acc * 100).toFixed(2)}%)`);
+  if (id === "classic") {
+    writeFileSync(join(ASSETS, "weights.json"), json);
+    console.log("wrote src/assets/weights.json (same classic net)");
+  }
 
-  // ---- export samples.json: per class, 5 confident-correct + 1 ambiguous-correct
+  return { shape, layers, acts, x, testAccuracy: acc };
+}
+
+// ---- samples.json: per class, 5 confident-correct + 1 ambiguous-correct,
+//      always picked by the CLASSIC net (the attract loop's shared deck)
+
+function exportSamples(trained, data) {
+  const { shape, layers, acts, x } = trained;
+  const { test, testLabels } = data;
   const softmaxConfidence = (s) => {
     for (let i = 0; i < 784; i++) x[i] = test.pixels[s * 784 + i] / 255;
-    const pred = predict(layers, acts, x);
-    const logits = acts[SHAPE.length - 1];
+    const pred = predict(shape, layers, acts, x);
+    const logits = acts[shape.length - 1];
+    const nClasses = shape[shape.length - 1];
     let max = -Infinity;
-    for (let o = 0; o < 10; o++) max = Math.max(max, logits[o]);
+    for (let o = 0; o < nClasses; o++) max = Math.max(max, logits[o]);
     let sum = 0;
-    for (let o = 0; o < 10; o++) sum += Math.exp(logits[o] - max);
+    for (let o = 0; o < nClasses; o++) sum += Math.exp(logits[o] - max);
     return { pred, confidence: Math.exp(logits[pred] - max) / sum };
   };
   const samples = [];
@@ -320,6 +350,33 @@ async function main() {
   }
   writeFileSync(join(ASSETS, "samples.json"), JSON.stringify({ samples }));
   console.log(`wrote src/assets/samples.json (${samples.length} digits)`);
+}
+
+// -------------------------------------------------------------------- main
+
+async function main() {
+  const arg = process.argv[2] ?? "classic";
+  const ids = arg === "all" ? Object.keys(VARIANTS) : [arg];
+  for (const id of ids) {
+    if (!VARIANTS[id]) {
+      throw new Error(`unknown variant "${id}" — use ${Object.keys(VARIANTS).join("/")} or all`);
+    }
+  }
+
+  const paths = {};
+  for (const [key, name] of Object.entries(FILES)) paths[key] = await ensureFile(name);
+  const data = {
+    train: parseIdxImages(paths.trainImages),
+    trainLabels: parseIdxLabels(paths.trainLabels),
+    test: parseIdxImages(paths.testImages),
+    testLabels: parseIdxLabels(paths.testLabels),
+  };
+  console.log(`train ${data.train.n}, test ${data.test.n}`);
+
+  for (const id of ids) {
+    const trained = trainVariant(id, VARIANTS[id], data);
+    if (id === "classic") exportSamples(trained, data);
+  }
 }
 
 main().catch((err) => {

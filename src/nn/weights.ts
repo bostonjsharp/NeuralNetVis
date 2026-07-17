@@ -10,6 +10,9 @@ export interface Net {
 }
 
 export interface WeightsJson {
+  /** Variant identity — absent in pre-variant exports. */
+  id?: string;
+  label?: string;
   shape: number[];
   testAccuracy: number;
   trainedAt: string;

@@ -18,7 +18,7 @@ export class ConnectionMesh {
     const stageMasks = new Float32Array(totalEdges * 2 * 3);
 
     let v = 0;
-    for (let stage = 0; stage < 3; stage++) {
+    for (let stage = 0; stage < layout.edges.length; stage++) {
       const set = layout.edges[stage];
       const fromPositions = stage === 0 ? layout.inputPositions : layout.layerPositions[stage - 1];
       const toPositions = layout.layerPositions[stage];
@@ -79,9 +79,14 @@ export class ConnectionMesh {
     this.lines.frustumCulled = false;
   }
 
-  /** Per-stage glow lift, 0..1 each, driven by the fire timeline. */
-  setStageGlow(s0: number, s1: number, s2: number): void {
-    (this.material.uniforms.uStageGlow.value as THREE.Vector3).set(s0, s1, s2);
+  /** Per-stage glow lift, 0..1 each, driven by the fire timeline.
+   *  Unused vec3 lanes (nets with <3 stages) stay zero. */
+  setStageGlow(glows: number[]): void {
+    (this.material.uniforms.uStageGlow.value as THREE.Vector3).set(
+      glows[0] ?? 0,
+      glows[1] ?? 0,
+      glows[2] ?? 0
+    );
   }
 
   dispose(): void {

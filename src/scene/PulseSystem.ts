@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { FIRE } from "./fire";
+import type { FireTimeline } from "./fire";
 import { maxAbsWeight, type NetworkLayout } from "./NetworkLayout";
 
 /**
@@ -13,18 +13,31 @@ import { maxAbsWeight, type NetworkLayout } from "./NetworkLayout";
 const PARTICLES_PER_EDGE = 2;
 const SIGNAL_VISIBLE_THRESHOLD = 0.05;
 
+/** Per-stage damping by role: the input wave fires the most particles from
+ *  one small region (undamped it novas out and hides the digit); the final
+ *  wave is the payoff and gets full brightness. Reproduces the hand-tuned
+ *  [0.35, 0.7, 0.85] / [0.55, 0.9, 1.0] at three stages. */
+const stageAlpha = (stage: number, stages: number): number =>
+  stage === 0 ? 0.35 : stage === stages - 1 ? 0.85 : 0.7;
+const stageSize = (stage: number, stages: number): number =>
+  stage === 0 ? 0.55 : stage === stages - 1 ? 1.0 : 0.9;
+
+const paddedVec3 = (values: number[]): THREE.Vector3 =>
+  new THREE.Vector3(values[0] ?? 0, values[1] ?? 0, values[2] ?? 0);
+
 export class PulseSystem {
   readonly points: THREE.Points;
   private readonly material: THREE.ShaderMaterial;
   private readonly signalAttr: THREE.BufferAttribute;
   private readonly edgeCounts: number[];
   private readonly layout: NetworkLayout;
-  private readonly weightNorm: [number, number, number];
+  private readonly weightNorm: number[];
 
-  constructor(layout: NetworkLayout) {
+  constructor(layout: NetworkLayout, fire: FireTimeline) {
     this.layout = layout;
     this.edgeCounts = layout.edges.map((set) => set.count);
-    this.weightNorm = layout.edges.map((set) => maxAbsWeight(set)) as [number, number, number];
+    this.weightNorm = layout.edges.map((set) => maxAbsWeight(set));
+    const stages = layout.edges.length;
     const totalParticles =
       this.edgeCounts.reduce((a, b) => a + b, 0) * PARTICLES_PER_EDGE;
 
@@ -36,7 +49,7 @@ export class PulseSystem {
     const signals = new Float32Array(totalParticles);
 
     let p = 0;
-    for (let stage = 0; stage < 3; stage++) {
+    for (let stage = 0; stage < stages; stage++) {
       const set = layout.edges[stage];
       const fromPositions = stage === 0 ? layout.inputPositions : layout.layerPositions[stage - 1];
       const toPositions = layout.layerPositions[stage];
@@ -72,12 +85,16 @@ export class PulseSystem {
       uniforms: {
         uTime: { value: 0 },
         uFireTime: { value: -1e9 },
-        uStageStart: { value: new THREE.Vector3(...FIRE.stageStart) },
-        uStageDur: { value: new THREE.Vector3(...FIRE.stageDur) },
-        // Stage 0 fires 3× the particles of the deeper stages from one small
-        // region — without damping it novas out and hides the digit.
-        uStageAlpha: { value: new THREE.Vector3(0.35, 0.7, 0.85) },
-        uStageSize: { value: new THREE.Vector3(0.55, 0.9, 1.0) },
+        uStageStart: { value: paddedVec3(fire.stageStart) },
+        uStageDur: { value: paddedVec3(fire.stageDur) },
+        uStageAlpha: {
+          value: paddedVec3(
+            Array.from({ length: stages }, (_, s) => stageAlpha(s, stages))
+          ),
+        },
+        uStageSize: {
+          value: paddedVec3(Array.from({ length: stages }, (_, s) => stageSize(s, stages))),
+        },
       },
       vertexShader: /* glsl */ `
         attribute vec3 aStart;
@@ -137,7 +154,7 @@ export class PulseSystem {
   fire(activations: Float32Array[], nowSeconds: number): void {
     const signals = this.signalAttr.array as Float32Array;
     let p = 0;
-    for (let stage = 0; stage < 3; stage++) {
+    for (let stage = 0; stage < this.layout.edges.length; stage++) {
       const set = this.layout.edges[stage];
       const source = activations[stage];
       let sourceMax = 0;

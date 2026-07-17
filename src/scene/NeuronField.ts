@@ -6,9 +6,9 @@ import {
 } from "./NetworkLayout";
 
 /**
- * Every neuron (16 + 16 + 10) as one InstancedMesh — a single draw call.
- * Per-instance HDR color carries activation brightness into the bloom pass;
- * per-instance scale gives the pop animation.
+ * Every downstream neuron (hidden + output) as one InstancedMesh — a single
+ * draw call. Per-instance HDR color carries activation brightness into the
+ * bloom pass; per-instance scale gives the pop animation.
  */
 export class NeuronField {
   readonly mesh: THREE.InstancedMesh;
@@ -17,18 +17,21 @@ export class NeuronField {
   private readonly baseRadii: number[] = [];
   private readonly dummy = new THREE.Object3D();
 
-  /** Flat instance index of a neuron. Layers: 0=h1, 1=h2, 2=output. */
+  /** Flat instance index of a neuron. Layers: hidden… then output last. */
   readonly indexOf: (layer: number, neuron: number) => number;
 
   constructor(layout: NetworkLayout) {
     const counts = layout.layerPositions.map((p) => p.length / 3);
     this.count = counts.reduce((a, b) => a + b, 0);
-    const offsets = [0, counts[0], counts[0] + counts[1]];
+    const offsets = counts.map((_, layer) =>
+      counts.slice(0, layer).reduce((a, b) => a + b, 0)
+    );
     this.indexOf = (layer, neuron) => offsets[layer] + neuron;
 
-    for (let layer = 0; layer < 3; layer++) {
+    const lastLayer = counts.length - 1;
+    for (let layer = 0; layer < counts.length; layer++) {
       const positions = layout.layerPositions[layer];
-      const radius = layer === 2 ? NEURON_RADIUS_OUTPUT : NEURON_RADIUS_HIDDEN;
+      const radius = layer === lastLayer ? NEURON_RADIUS_OUTPUT : NEURON_RADIUS_HIDDEN;
       for (let i = 0; i < counts[layer]; i++) {
         this.basePositions.push(
           new THREE.Vector3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2])

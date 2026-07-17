@@ -6,6 +6,10 @@ import type { Net } from "../nn/weights";
  * Everything the scene renders (neuron instances, connection lines, pulse
  * endpoints) reads positions from here, so the whole composition is tuned
  * in one file and unit-testable.
+ *
+ * Shapes are 784 → (0..2 hidden layers) → 10. The input plane and output
+ * column are exhibit invariants — they never move, so camera framing and
+ * the digit glyphs survive every brain swap; only the middle reshapes.
  */
 
 export const GRID = 28;
@@ -14,15 +18,20 @@ export const PIXEL_PITCH = 0.4;
 export const INPUT_TILT_Y = 0.45;
 export const INPUT_CENTER: readonly [number, number, number] = [-16.5, 0, 0];
 
-const HIDDEN_X = [-3.5, 7.5];
+/** Hidden columns spread evenly across this span — [-3.5, 7.5] reproduces
+ *  the original hand-tuned two-column composition exactly. */
+const HIDDEN_X_MIN = -3.5;
+const HIDDEN_X_MAX = 7.5;
 const HIDDEN_SPACING = 0.92;
+/** Tallest a column may grow before its spacing tightens to fit the frame. */
+const MAX_COLUMN_HEIGHT = 14;
 const OUTPUT_X = 18;
 const OUTPUT_SPACING = 1.24;
 
 export const NEURON_RADIUS_HIDDEN = 0.34;
 export const NEURON_RADIUS_OUTPUT = 0.46;
 
-/** Strongest input→h1 edges kept per hidden neuron (full 12,544 is a hairball). */
+/** Strongest input edges kept per destination neuron (full 12,544 is a hairball). */
 export const INPUT_TOP_K = 32;
 
 export interface EdgeSet {
@@ -37,16 +46,27 @@ export interface EdgeSet {
 export interface NetworkLayout {
   /** World position of each input pixel center, xyz-interleaved (784×3). */
   inputPositions: Float32Array;
-  /** h1, h2, output neuron world positions, xyz-interleaved. */
-  layerPositions: [Float32Array, Float32Array, Float32Array];
-  /** Rendered edges per stage: input→h1 (top-K), h1→h2 (all), h2→out (all). */
-  edges: [EdgeSet, EdgeSet, EdgeSet];
+  /** Downstream layer positions (hidden…, output), xyz-interleaved. */
+  layerPositions: Float32Array[];
+  /** Rendered edges per stage: input→first (top-K), then dense. */
+  edges: EdgeSet[];
 }
 
-export function buildLayout(net: Net): NetworkLayout {
+export interface LayoutOptions {
+  /** Override the stage-0 pruning — sparse nets can afford richer fans. */
+  inputTopK?: number;
+}
+
+export function buildLayout(net: Net, options: LayoutOptions = {}): NetworkLayout {
   const { shape } = net;
-  if (shape.length !== 4 || shape[0] !== GRID * GRID) {
-    throw new Error(`layout expects a 784-h-h-out net, got [${shape}]`);
+  if (shape[0] !== GRID * GRID) {
+    throw new Error(`layout expects 784 inputs, got [${shape}]`);
+  }
+  if (shape[shape.length - 1] !== 10) {
+    throw new Error(`layout expects 10 outputs, got [${shape}]`);
+  }
+  if (shape.length < 2 || shape.length > 4) {
+    throw new Error(`layout supports 0..2 hidden layers, got [${shape}]`);
   }
 
   const inputPositions = new Float32Array(shape[0] * 3);
@@ -72,22 +92,33 @@ export function buildLayout(net: Net): NetworkLayout {
     }
     return positions;
   };
-  const layerPositions: [Float32Array, Float32Array, Float32Array] = [
-    column(shape[1], HIDDEN_X[0], HIDDEN_SPACING),
-    column(shape[2], HIDDEN_X[1], HIDDEN_SPACING),
-    column(shape[3], OUTPUT_X, OUTPUT_SPACING),
-  ];
 
-  // Stage 0: only each h1 neuron's strongest input weights
-  const k = Math.min(INPUT_TOP_K, shape[0]);
+  const hiddenCount = shape.length - 2;
+  const hiddenX = (index: number): number =>
+    hiddenCount === 1
+      ? (HIDDEN_X_MIN + HIDDEN_X_MAX) / 2
+      : HIDDEN_X_MIN + (index * (HIDDEN_X_MAX - HIDDEN_X_MIN)) / (hiddenCount - 1);
+  const hiddenSpacing = (n: number): number =>
+    Math.min(HIDDEN_SPACING, MAX_COLUMN_HEIGHT / Math.max(1, n - 1));
+
+  const layerPositions: Float32Array[] = [];
+  for (let h = 0; h < hiddenCount; h++) {
+    const n = shape[h + 1];
+    layerPositions.push(column(n, hiddenX(h), hiddenSpacing(n)));
+  }
+  layerPositions.push(column(shape[shape.length - 1], OUTPUT_X, OUTPUT_SPACING));
+
+  // Stage 0: only each first-layer neuron's strongest input weights
+  const k = Math.min(options.inputTopK ?? INPUT_TOP_K, shape[0]);
+  const nFirst = shape[1];
   const s0 = {
-    from: new Uint16Array(shape[1] * k),
-    to: new Uint16Array(shape[1] * k),
-    weight: new Float32Array(shape[1] * k),
-    count: shape[1] * k,
+    from: new Uint16Array(nFirst * k),
+    to: new Uint16Array(nFirst * k),
+    weight: new Float32Array(nFirst * k),
+    count: nFirst * k,
   };
   const W0 = net.layers[0].W;
-  for (let o = 0; o < shape[1]; o++) {
+  for (let o = 0; o < nFirst; o++) {
     const row = W0.subarray(o * shape[0], (o + 1) * shape[0]);
     const top = topKIndices(row, k);
     for (let j = 0; j < k; j++) {
@@ -118,7 +149,10 @@ export function buildLayout(net: Net): NetworkLayout {
     return set;
   };
 
-  return { inputPositions, layerPositions, edges: [s0, dense(1), dense(2)] };
+  const edges: EdgeSet[] = [s0];
+  for (let l = 1; l < shape.length - 1; l++) edges.push(dense(l));
+
+  return { inputPositions, layerPositions, edges };
 }
 
 /** Indices of the k largest values by magnitude, strongest first. */

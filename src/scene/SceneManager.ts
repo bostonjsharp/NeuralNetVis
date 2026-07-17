@@ -8,6 +8,7 @@ import { ConnectionMesh } from "./ConnectionMesh";
 import { installContextLossRecovery } from "./contextLossRecovery";
 import {
   inputRamp,
+  makeFireTimeline,
   neuronPop,
   neuronReveal,
   stageGlow,
@@ -42,6 +43,7 @@ export function createScene(
   quality: "high" | "low" = "high"
 ): SceneApi {
   const layout: NetworkLayout = buildLayout(net);
+  const fire = makeFireTimeline(layout.edges.length);
 
   // Three handles a context loss that restores; this reboots the page when
   // the driver never restores it (the unattended-wall failure mode).
@@ -63,7 +65,7 @@ export function createScene(
   const inputPlane = new InputPlane();
   const neurons = new NeuronField(layout);
   const connections = new ConnectionMesh(layout);
-  const pulses = new PulseSystem(layout);
+  const pulses = new PulseSystem(layout, fire);
   const glyphs = new OutputGlyphs(layout);
   const flare = new WinnerFlare();
   scene.add(starfield.points, inputPlane.mesh, connections.lines, neurons.mesh);
@@ -84,8 +86,9 @@ export function createScene(
   let raf = 0;
 
   function updateNeurons(tSinceFire: number) {
-    const flareEnv = fireResult ? winnerFlare(tSinceFire) : 0;
-    for (let layer = 0; layer < 3; layer++) {
+    const flareEnv = fireResult ? winnerFlare(fire, tSinceFire) : 0;
+    const lastLayer = layerCounts.length - 1;
+    for (let layer = 0; layer < layerCounts.length; layer++) {
       const count = layerCounts[layer];
       for (let i = 0; i < count; i++) {
         const instance = neurons.indexOf(layer, i);
@@ -94,13 +97,13 @@ export function createScene(
         let scale = 1;
         let warmth = 0;
         if (fireResult) {
-          const reveal = neuronReveal(tSinceFire, layer, i, count);
+          const reveal = neuronReveal(fire, tSinceFire, layer, i, count);
           // Perceptual curve: keep weak activations visibly dimmer than
           // strong ones instead of letting bloom crush everything to white.
           const level = Math.pow(normalized[layer][i], 1.6);
           brightness += reveal * level * 1.05;
-          scale = neuronPop(tSinceFire, layer, i, count) * (1 + 0.22 * level * reveal);
-          if (layer === 2 && i === fireResult.argmax) {
+          scale = neuronPop(fire, tSinceFire, layer, i, count) * (1 + 0.22 * level * reveal);
+          if (layer === lastLayer && i === fireResult.argmax) {
             brightness += 0.4 * flareEnv;
             scale += 0.3 * flareEnv;
             warmth = Math.max(flareEnv, 0.4 * reveal * level);
@@ -128,14 +131,16 @@ export function createScene(
     starfield.update(elapsed);
     pulses.update(elapsed);
     inputPlane.setBrightness(fireResult ? inputRamp(tSinceFire) : 1);
-    // Stage 0's 512 lines share one small screen region — halve its glow lift
+    // Stage 0's many lines share one small screen region — halve its glow lift
     connections.setStageGlow(
-      fireResult ? 0.5 * stageGlow(tSinceFire, 0) : 0,
-      fireResult ? stageGlow(tSinceFire, 1) : 0,
-      fireResult ? stageGlow(tSinceFire, 2) : 0
+      layout.edges.map((_, stage) =>
+        fireResult ? (stage === 0 ? 0.5 : 1) * stageGlow(fire, tSinceFire, stage) : 0
+      )
     );
     const flareEnv = updateNeurons(tSinceFire);
-    const outputReveal = fireResult ? neuronReveal(tSinceFire, 2, 0, 1) : 0;
+    const outputReveal = fireResult
+      ? neuronReveal(fire, tSinceFire, layerCounts.length - 1, 0, 1)
+      : 0;
     glyphs.update(fireResult ? fireResult.probs : null, Math.max(outputReveal, fireResult ? 0.35 : 0.2), fireResult?.argmax ?? 0, flareEnv);
     flare.update(flareEnv, camera);
     post.bloom.strength = BLOOM_BASE_STRENGTH + 0.12 * flareEnv;
@@ -149,10 +154,11 @@ export function createScene(
       fireResult = result;
       fireStart = elapsed;
       // Normalize each layer's activations to 0..1 for display brightness
-      normalized = [1, 2, 3].map((layerIdx) => {
+      normalized = layerCounts.map((_, j) => {
+        const layerIdx = j + 1; // activations[0] is the input plane
         const source = result.activations[layerIdx];
         const values =
-          layerIdx === 3 ? result.probs : source; // output brightness follows probabilities
+          j === layerCounts.length - 1 ? result.probs : source; // output brightness follows probabilities
         let max = 0;
         for (let i = 0; i < values.length; i++) max = Math.max(max, values[i]);
         const norm = max > 0 ? 1 / max : 0;
@@ -160,7 +166,7 @@ export function createScene(
       });
       inputPlane.setPixels(result.activations[0]);
       pulses.fire(result.activations, elapsed);
-      flare.setTarget(neurons.positionOf(2, result.argmax));
+      flare.setTarget(neurons.positionOf(layerCounts.length - 1, result.argmax));
     },
     setMode(mode) {
       rig.setMode(mode);
