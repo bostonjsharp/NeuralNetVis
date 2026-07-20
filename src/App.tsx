@@ -16,7 +16,8 @@ import { GestureController } from "./gesture/gestureController";
 import { startHandTracking, type GestureState } from "./gesture/handTracker";
 import DebugPanel, { type DebugData } from "./hud/DebugPanel";
 import type { DrawPadHandle } from "./hud/DrawPad";
-import { forwardPass, type ForwardResult } from "./nn/inference";
+import type { ForwardResult } from "./nn/inference";
+import { createStagedPass } from "./nn/stagedPass";
 import { downsampleTo28, preprocessDrawing } from "./nn/preprocess";
 import { DEFAULT_VARIANT_ID, getVariant, nextVariantId } from "./nn/variants";
 import { decodeSamplePixels, type SamplesJson } from "./nn/weights";
@@ -57,7 +58,6 @@ export default function App() {
   const debugOpenRef = useRef(debugOpen);
   debugOpenRef.current = debugOpen;
   const debugDataRef = useRef<DebugData>({ video: null, frame: null });
-  const barsTimer = useRef(0);
   const cinematicTimer = useRef(0);
   const autoFireTimer = useRef(0);
   /** The most recent classified input — re-fired through a freshly swapped brain. */
@@ -94,7 +94,6 @@ export default function App() {
     prevBrainRef.current = state.brainId;
     window.clearTimeout(autoFireTimer.current);
     window.clearTimeout(cinematicTimer.current);
-    window.clearTimeout(barsTimer.current);
     // Keep the on-screen verdict as the comparison for the re-fire
     prevSummaryRef.current = displayedRef.current;
     setDisplayed(null);
@@ -109,46 +108,45 @@ export default function App() {
     sceneRef.current?.setMode(attract ? "attract" : "interactive");
   }, [attract]);
 
-  const showResultLater = (summary: InferenceSummary) => {
-    window.clearTimeout(barsTimer.current);
-    setDisplayed(null);
-    setComparison(null);
-    // A comparison only makes sense against the same input through a
-    // different brain — consumed once, when the bars land.
-    const against = prevSummaryRef.current;
-    prevSummaryRef.current = null;
-    // The HUD bars land in sync with the cinematic's output reveal
-    const revealMs = timelineFor(summary.brainId).layerPop.at(-1)! * 1000;
-    barsTimer.current = window.setTimeout(() => {
-      setDisplayed(summary);
-      setComparison(against && against.brainId !== summary.brainId ? against : null);
-    }, revealMs);
-  };
-
   const runInference = (
     pixels: Float32Array,
     source: InferenceSummary["source"],
     sampleLabel?: number
-  ): ForwardResult => {
+  ): void => {
     const brainId = stateRef.current.brainId;
-    const result = forwardPass(getVariant(brainId).net, pixels);
-    const summary: InferenceSummary = {
-      probs: Array.from(result.probs),
-      argmax: result.argmax,
-      source,
-      sampleLabel,
-      brainId,
-    };
+    const pass = createStagedPass(getVariant(brainId).net, pixels);
     // A NEW input invalidates any cross-brain comparison; a re-fire of the
     // exact same pixels array (morph landing, attract repeat) keeps it.
     if (prevPixelsRef.current !== pixels) prevSummaryRef.current = null;
     prevPixelsRef.current = pixels;
     lastInputRef.current = { pixels, source, sampleLabel };
+    setDisplayed(null);
+    setComparison(null);
     sceneRef.current?.setInputPixels(pixels);
-    sceneRef.current?.fire(result);
-    dispatch({ type: "fire", summary });
-    showResultLater(summary);
-    return result;
+    // The callback fires at the exact frame the output layer computes — the
+    // HUD lands in lockstep with the cinematic's output reveal, no timer.
+    // A pass superseded by a re-fire or brain swap never calls back.
+    sceneRef.current?.fire(pass, (result: ForwardResult) => {
+      const mode = stateRef.current.mode;
+      // An attract fire's late verdict must not pop into a visitor's fresh
+      // draw panel (they woke the wall while the wave was in flight).
+      if (mode !== "infer" && mode !== "result" && mode !== "attract") return;
+      const summary: InferenceSummary = {
+        probs: Array.from(result.probs),
+        argmax: result.argmax,
+        source,
+        sampleLabel,
+        brainId,
+      };
+      // A comparison only makes sense against the same input through a
+      // different brain — consumed once, when the verdict lands.
+      const against = prevSummaryRef.current;
+      prevSummaryRef.current = null;
+      setDisplayed(summary);
+      setComparison(against && against.brainId !== summary.brainId ? against : null);
+      dispatch({ type: "resultReady", summary });
+    });
+    dispatch({ type: "fire" });
   };
 
   // Attract loop: a shuffled sample digit flows through the network on a
@@ -181,7 +179,6 @@ export default function App() {
       window.clearInterval(interval);
       window.clearTimeout(swapTimer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attract]);
 
   // Pointer activity hands the wall to the visitor. Movement must be
@@ -210,9 +207,6 @@ export default function App() {
   // Entering interactive mode: blank pad, blank plane, clean verdict
   useEffect(() => {
     if (attract) return;
-    // A bars timer from an attract-mode fire may still be pending — a stale
-    // verdict would pop into the fresh draw panel without this.
-    window.clearTimeout(barsTimer.current);
     setPadReset((k) => k + 1);
     setDisplayed(null);
     // The attract loop's last sample must not re-fire into a fresh visitor's
@@ -222,7 +216,6 @@ export default function App() {
     return () => {
       window.clearTimeout(autoFireTimer.current);
       window.clearTimeout(cinematicTimer.current);
-      window.clearTimeout(barsTimer.current);
     };
   }, [attract]);
 
