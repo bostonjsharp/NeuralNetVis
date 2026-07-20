@@ -240,6 +240,9 @@ export function createScene(
         firePass = null;
         fireOnResult = null;
         deliver?.(fireResult!);
+        // The callback may synchronously start a new fire(); this pass is
+        // finished either way — never resume the loop against a stale `due`.
+        return;
       } else {
         // The wave carrying these values departs at stageStart[layerIdx],
         // after this landing — its particles stay invisible until then, so
