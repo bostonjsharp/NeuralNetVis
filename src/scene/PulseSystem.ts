@@ -146,29 +146,47 @@ export class PulseSystem {
   }
 
   /**
-   * Load per-edge signals for a forward pass and start the pulse waves.
-   * `activations` is ForwardResult.activations (input first). Hidden-layer
-   * sources are normalized by their layer max so brightness always uses the
-   * full range.
+   * Start a new pass: zero every stage's signals and stamp the fire time.
+   * GPU attribute buffers persist across fires — without the wipe, the
+   * previous digit's signals would fly on stages whose waves haven't been
+   * earned yet. Stages light up via loadStage as their sources compute.
    */
-  fire(activations: Float32Array[], nowSeconds: number): void {
-    const signals = this.signalAttr.array as Float32Array;
-    let p = 0;
-    for (let stage = 0; stage < this.layout.edges.length; stage++) {
-      const set = this.layout.edges[stage];
-      const source = activations[stage];
-      let sourceMax = 0;
-      for (let i = 0; i < source.length; i++) sourceMax = Math.max(sourceMax, source[i]);
-      const norm = sourceMax > 0 ? 1 / sourceMax : 0;
-      for (let e = 0; e < set.count; e++) {
-        const signal =
-          source[set.from[e]] * norm * (set.weight[e] / this.weightNorm[stage]);
-        const clamped = Math.max(-1, Math.min(1, signal));
-        for (let slot = 0; slot < PARTICLES_PER_EDGE; slot++, p++) signals[p] = clamped;
-      }
-    }
+  beginFire(nowSeconds: number): void {
+    (this.signalAttr.array as Float32Array).fill(0);
     this.signalAttr.needsUpdate = true;
     this.material.uniforms.uFireTime.value = nowSeconds;
+  }
+
+  /**
+   * Write one stage's per-edge signals from its source layer's activations
+   * (activation × weight — the literal terms of the destination dot
+   * products). Hidden-layer sources are normalized by their layer max so
+   * brightness always uses the full range.
+   */
+  loadStage(stage: number, source: Float32Array): void {
+    const signals = this.signalAttr.array as Float32Array;
+    let p = 0;
+    for (let s = 0; s < stage; s++) p += this.edgeCounts[s] * PARTICLES_PER_EDGE;
+    const set = this.layout.edges[stage];
+    let sourceMax = 0;
+    for (let i = 0; i < source.length; i++) sourceMax = Math.max(sourceMax, source[i]);
+    const norm = sourceMax > 0 ? 1 / sourceMax : 0;
+    for (let e = 0; e < set.count; e++) {
+      const signal =
+        source[set.from[e]] * norm * (set.weight[e] / this.weightNorm[stage]);
+      const clamped = Math.max(-1, Math.min(1, signal));
+      for (let slot = 0; slot < PARTICLES_PER_EDGE; slot++, p++) signals[p] = clamped;
+    }
+    this.signalAttr.needsUpdate = true;
+  }
+
+  /** One-shot loading of a completed pass — SceneManager still calls this
+   *  until the staged drive lands; removed in the SceneManager task. */
+  fire(activations: Float32Array[], nowSeconds: number): void {
+    this.beginFire(nowSeconds);
+    for (let stage = 0; stage < this.layout.edges.length; stage++) {
+      this.loadStage(stage, activations[stage]);
+    }
   }
 
   update(nowSeconds: number): void {
