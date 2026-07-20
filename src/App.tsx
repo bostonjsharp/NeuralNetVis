@@ -233,8 +233,9 @@ export default function App() {
 
   // Optional webcam hand control, tuned for a camera 2+ meters away:
   // raise a hand and HOLD IT ~5s (a progress ring fills) to start, then
-  // ✊ fist = pen down, ✋ open = pen lifted between strokes, and crossing
-  // both arms in an ✕ clears the pad. Fails silently into mouse-only when
+  // ✊ fist = pen down, ✋ open = pen lifted between strokes, 👍 held =
+  // switch brains, and crossing both arms in an ✕ clears the pad.
+  // Fails silently into mouse-only when
   // there's no camera/permission. All hold-timing and latching rules live
   // in GestureController (pure, unit-tested); this effect only interprets
   // its commands against dispatch/DrawPad.

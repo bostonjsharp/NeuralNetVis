@@ -17,6 +17,7 @@ function hand(overrides: Partial<GestureState> = {}): GestureState {
     pose: "open",
     raised: false,
     crossed: false,
+    thumbsUp: false,
     ...overrides,
   };
 }
@@ -174,57 +175,77 @@ describe("arms-crossed clear", () => {
 });
 
 describe("brain-cycle hold (interactive modes)", () => {
-  it("cycles the brain after a sustained raised open hand in draw mode", () => {
+  it("cycles the brain after a sustained 👍 in draw mode", () => {
     const c = new GestureController();
-    expect(types(c.update(hand({ raised: true }), "draw", 0))).not.toContain("cycleBrain");
-    expect(types(c.update(hand({ raised: true }), "draw", BRAIN_HOLD_MS - 1))).not.toContain(
+    expect(types(c.update(hand({ thumbsUp: true }), "draw", 0))).not.toContain("cycleBrain");
+    expect(types(c.update(hand({ thumbsUp: true }), "draw", BRAIN_HOLD_MS - 1))).not.toContain(
       "cycleBrain"
     );
-    expect(types(c.update(hand({ raised: true }), "draw", BRAIN_HOLD_MS))).toContain("cycleBrain");
+    expect(types(c.update(hand({ thumbsUp: true }), "draw", BRAIN_HOLD_MS))).toContain(
+      "cycleBrain"
+    );
   });
 
-  it("shows ring progress while holding and resets when the hand lowers", () => {
+  it("works at chest height — no raise required", () => {
+    const c = new GestureController();
+    c.update(hand({ thumbsUp: true, raised: false }), "draw", 0);
+    expect(
+      types(c.update(hand({ thumbsUp: true, raised: false }), "draw", BRAIN_HOLD_MS))
+    ).toContain("cycleBrain");
+  });
+
+  it("a raised open hand alone never cycles (the old colliding verb)", () => {
     const c = new GestureController();
     c.update(hand({ raised: true }), "draw", 0);
-    const mid = c.update(hand({ raised: true }), "draw", BRAIN_HOLD_MS / 2);
-    const progress = mid.find((cmd) => cmd.type === "wakeProgress");
-    expect(progress).toBeDefined();
-    expect((progress as { value: number }).value).toBeCloseTo(0.5, 1);
-    // Lowering resets — re-raising must start over
-    c.update(hand({ raised: false }), "draw", BRAIN_HOLD_MS / 2 + 100);
     expect(
-      types(c.update(hand({ raised: true }), "draw", BRAIN_HOLD_MS + 200))
+      types(c.update(hand({ raised: true }), "draw", BRAIN_HOLD_MS + 500))
     ).not.toContain("cycleBrain");
   });
 
-  it("a drawing fist never cycles brains, even when raised", () => {
+  it("shows ring progress while holding and resets when the thumb drops", () => {
     const c = new GestureController();
-    c.update(hand({ raised: true, pose: "fist" }), "draw", 0);
+    c.update(hand({ thumbsUp: true }), "draw", 0);
+    const mid = c.update(hand({ thumbsUp: true }), "draw", BRAIN_HOLD_MS / 2);
+    const progress = mid.find((cmd) => cmd.type === "wakeProgress");
+    expect(progress).toBeDefined();
+    expect((progress as { value: number }).value).toBeCloseTo(0.5, 1);
+    // Dropping the thumb resets — re-holding must start over
+    c.update(hand({ thumbsUp: false }), "draw", BRAIN_HOLD_MS / 2 + 100);
     expect(
-      types(c.update(hand({ raised: true, pose: "fist" }), "draw", BRAIN_HOLD_MS + 500))
+      types(c.update(hand({ thumbsUp: true }), "draw", BRAIN_HOLD_MS + 200))
+    ).not.toContain("cycleBrain");
+  });
+
+  it("crossed arms suppress the cycle hold", () => {
+    const c = new GestureController();
+    c.update(hand({ thumbsUp: true, crossed: true }), "draw", 0);
+    expect(
+      types(c.update(hand({ thumbsUp: true, crossed: true }), "draw", BRAIN_HOLD_MS + 500))
     ).not.toContain("cycleBrain");
   });
 
   it("never cycles during infer or morph", () => {
     for (const mode of ["infer", "morph"] as const) {
       const c = new GestureController();
-      c.update(hand({ raised: true }), mode, 0);
-      expect(types(c.update(hand({ raised: true }), mode, BRAIN_HOLD_MS + 500))).not.toContain(
-        "cycleBrain"
-      );
+      c.update(hand({ thumbsUp: true }), mode, 0);
+      expect(
+        types(c.update(hand({ thumbsUp: true }), mode, BRAIN_HOLD_MS + 500))
+      ).not.toContain("cycleBrain");
     }
   });
 
   it("a continuous hold cycles again after another full hold", () => {
     const c = new GestureController();
-    c.update(hand({ raised: true }), "draw", 0);
-    expect(types(c.update(hand({ raised: true }), "draw", BRAIN_HOLD_MS))).toContain("cycleBrain");
+    c.update(hand({ thumbsUp: true }), "draw", 0);
+    expect(types(c.update(hand({ thumbsUp: true }), "draw", BRAIN_HOLD_MS))).toContain(
+      "cycleBrain"
+    );
     expect(
-      types(c.update(hand({ raised: true }), "draw", BRAIN_HOLD_MS + 10))
+      types(c.update(hand({ thumbsUp: true }), "draw", BRAIN_HOLD_MS + 10))
     ).not.toContain("cycleBrain");
     // The second hold restarts on the frame after the fire (t=HOLD+10)
     expect(
-      types(c.update(hand({ raised: true }), "draw", BRAIN_HOLD_MS * 2 + 10))
+      types(c.update(hand({ thumbsUp: true }), "draw", BRAIN_HOLD_MS * 2 + 10))
     ).toContain("cycleBrain");
   });
 });

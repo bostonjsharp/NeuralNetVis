@@ -15,6 +15,7 @@ const makeHand = (x: number, y: number, span = 0.04): Landmark[] => {
 
 const FIST: GestureCategory[] = [{ categoryName: "Closed_Fist", score: 0.9 }];
 const OPEN: GestureCategory[] = [{ categoryName: "Open_Palm", score: 0.9 }];
+const THUMB: GestureCategory[] = [{ categoryName: "Thumb_Up", score: 0.9 }];
 
 /** Forearm segments crossing in an ✕ (indices 13-16 populated). */
 const crossedPose = (): PoseLandmark[] => {
@@ -151,6 +152,40 @@ describe("FramePipeline", () => {
       frame({ allHands: [makeHand(0.5, 0.6)], allGestures: [OPEN], poseRan: true, nowMs: 66 })
     );
     expect(cleared.state).toMatchObject({ crossed: false });
+  });
+
+  it("latches thumbs-up after sustained evidence and keeps the pen neutral", () => {
+    const pipeline = new FramePipeline();
+    const out = run(pipeline, 6, { allHands: [makeHand(0.5, 0.6)], allGestures: [THUMB] });
+    expect(out.state).toMatchObject({ present: true, thumbsUp: true, pose: "open" });
+  });
+
+  it("does not read a fist or open palm as thumbs-up", () => {
+    const pipeline = new FramePipeline();
+    const fist = run(pipeline, 6, { allHands: [makeHand(0.5, 0.6)], allGestures: [FIST] });
+    expect(fist.state).toMatchObject({ thumbsUp: false });
+    const open = run(pipeline, 6, { allHands: [makeHand(0.5, 0.6)], allGestures: [OPEN] }, 999);
+    expect(open.state).toMatchObject({ thumbsUp: false });
+  });
+
+  it("rides a thumbs-up through a brief tracking dropout", () => {
+    const pipeline = new FramePipeline();
+    run(pipeline, 6, { allHands: [makeHand(0.5, 0.6)], allGestures: [THUMB] });
+    // A couple of unreadable frames — the latch must not lose the hold
+    const out = run(pipeline, 3, {}, 6 * 33);
+    expect(out.state).toMatchObject({ present: true, thumbsUp: true });
+  });
+
+  it("releases thumbs-up promptly when the hand changes pose", () => {
+    const pipeline = new FramePipeline();
+    run(pipeline, 6, { allHands: [makeHand(0.5, 0.6)], allGestures: [THUMB] });
+    const out = run(
+      pipeline,
+      4,
+      { allHands: [makeHand(0.5, 0.6)], allGestures: [OPEN] },
+      6 * 33
+    );
+    expect(out.state).toMatchObject({ thumbsUp: false });
   });
 
   it("builds a debug frame only when asked", () => {

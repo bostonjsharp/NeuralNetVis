@@ -17,6 +17,7 @@ const BONES: readonly [number, number][] = [
  *  so the overlay shows the raw signal the latch is actually integrating. */
 function gestureColor(gesture: string): string {
   if (gesture === "Closed_Fist") return "#ffa03d";
+  if (gesture === "Thumb_Up") return "#5ee08a"; // the brain-switch verb
   if (gesture === "Open_Palm" || gesture === "Victory" || gesture === "Pointing_Up") {
     return "#4dbfff";
   }

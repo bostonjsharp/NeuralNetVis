@@ -53,6 +53,23 @@ export function penEvidence(gestures: GestureCategory[]): PenEvidence {
   return { fist, open };
 }
 
+/**
+ * Evidence for the 👍 brain-switch verb, shaped for PenLatch (which is a
+ * generic evidence-integrating Schmitt latch — here `fist` carries "is a
+ * thumbs-up" and `open` carries "is confidently something else"). Any other
+ * NAMED gesture argues against; an unreadable hand argues nothing, so the
+ * latch's decay handles 2m tracking flicker the same way it does for the pen.
+ */
+export function thumbEvidence(gestures: GestureCategory[]): PenEvidence {
+  let thumb = 0;
+  let other = 0;
+  for (const { categoryName, score } of gestures) {
+    if (categoryName === "Thumb_Up") thumb = Math.max(thumb, score);
+    else if (categoryName !== "None") other = Math.max(other, score);
+  }
+  return { fist: thumb, open: other };
+}
+
 /** Palm anchor: middle-finger MCP tracks the hand's center steadily. */
 export const PALM = 9;
 

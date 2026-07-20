@@ -6,9 +6,11 @@ import type { GestureState } from "./handTracker";
 export const WAKE_HOLD_MS = 5000;
 /** Arms-crossed dwell before the pad clears. */
 export const CROSS_HOLD_MS = 800;
-/** Raised-hand dwell in interactive mode before the brain cycles — shorter
- *  than the wake hold: the visitor already learned the raise-and-hold verb. */
-export const BRAIN_HOLD_MS = 2000;
+/** 👍 dwell in interactive mode before the brain cycles. Short: unlike the
+ *  old raised-open-hand verb (which collided with pen-up and wake), a
+ *  thumbs-up is a deliberate pose nobody strikes by accident, so the dwell
+ *  only needs to absorb classifier flicker, not filter intent. */
+export const BRAIN_HOLD_MS = 1500;
 
 /** Wake progress is quantized to this many steps so ~30fps camera callbacks
  *  produce ~50 HUD renders per fill, not 150. */
@@ -103,11 +105,11 @@ export class GestureController {
 
     this.wakeStart = null;
 
-    // Raised open hand held in draw/result cycles to the next brain — the
-    // same raise-and-hold verb the visitor learned to wake the wall, with
-    // the same progress ring. A drawing fist or a locked mode never cycles.
-    const canCycle =
-      (mode === "draw" || mode === "result") && g.raised && g.pose !== "fist" && !g.crossed;
+    // A held 👍 in draw/result cycles to the next brain, with the same
+    // progress ring as the wake hold. Deliberately NOT the raise-and-hold
+    // verb: that pose doubles as pen-up, so pausing mid-drawing with a hand
+    // up kept starting the ring. Works at chest height — no raise needed.
+    const canCycle = (mode === "draw" || mode === "result") && g.thumbsUp && !g.crossed;
     if (canCycle) {
       this.brainHoldStart ??= now;
       const progress = (now - this.brainHoldStart) / BRAIN_HOLD_MS;

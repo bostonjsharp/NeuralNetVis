@@ -11,6 +11,7 @@ import {
   PenLatch,
   pickPrimaryHand,
   POSE,
+  thumbEvidence,
   WRIST,
   wristsClose,
   type GestureCategory,
@@ -37,6 +38,8 @@ export interface GestureState {
   raised: boolean;
   /** Both hands up with palms together/crossed — the ✕ clear gesture. */
   crossed: boolean;
+  /** Latched 👍 on the primary hand — the brain-switch verb. */
+  thumbsUp: boolean;
 }
 
 /** Per-frame diagnostics for the dev overlay (G key / ?debug). */
@@ -94,6 +97,16 @@ export interface PipelineFrameOutput {
 
 export class FramePipeline {
   private readonly latch = new PenLatch();
+  // Same evidence-latch machinery, tuned snappier: engaging the 👍 hold only
+  // starts a 1.5s dwell (the dwell is the real filter), and releasing fast
+  // keeps the ring honest when the hand moves on.
+  private readonly thumbLatch = new PenLatch({
+    press: 0.3,
+    release: 0.5,
+    decay: 0.06,
+    downAt: 0.6,
+    upAt: 0.25,
+  });
   private readonly mapper = new PadMapper();
   // Speed-adaptive smoothing: steady when the hand hovers, near-transparent
   // when it strokes. A fixed factor could only ever be one or the other.
@@ -173,13 +186,15 @@ export class FramePipeline {
         buildDebug?.();
         return { state: null, debug };
       }
-      // No hand is not a fist. Bleed the latch down instead of freezing the
-      // last pose: a brief dropout rides through, a real absence lifts the
-      // pen well before the cursor itself is withdrawn.
+      // No hand is not a fist. Bleed the latches down instead of freezing
+      // the last pose: a brief dropout rides through, a real absence lifts
+      // the pen well before the cursor itself is withdrawn.
       const pose = this.latch.update(NO_EVIDENCE);
+      const thumbsUp = this.thumbLatch.update(NO_EVIDENCE) === "fist";
       if (++this.missedFrames > ABSENCE_GRACE_FRAMES) {
         this.hadHand = false;
         this.latch.reset();
+        this.thumbLatch.reset();
         this.mapper.reset();
         this.lastFrameTime = 0;
         this.lastPrimaryPalm = null;
@@ -190,6 +205,7 @@ export class FramePipeline {
           pose: "open",
           raised: false,
           crossed: false,
+          thumbsUp: false,
         });
         buildDebug?.();
         return { state, debug };
@@ -203,6 +219,7 @@ export class FramePipeline {
         pose,
         raised: false,
         crossed,
+        thumbsUp,
       });
       buildDebug?.();
       return { state, debug };
@@ -229,6 +246,7 @@ export class FramePipeline {
     this.smoothX = this.filterX.filter(mapped.x, dt);
     this.smoothY = this.filterY.filter(mapped.y, dt);
     const pose = this.latch.update(penEvidence(primary.gestures));
+    const thumbsUp = this.thumbLatch.update(thumbEvidence(primary.gestures)) === "fist";
     const state = this.emit({
       present: true,
       x: this.smoothX,
@@ -236,6 +254,7 @@ export class FramePipeline {
       pose,
       raised: isRaised(primary.landmarks),
       crossed,
+      thumbsUp,
     });
     buildDebug?.();
     return { state, debug };

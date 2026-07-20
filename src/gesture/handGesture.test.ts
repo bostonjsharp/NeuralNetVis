@@ -12,6 +12,7 @@ import {
   pickPrimaryHand,
   POSE,
   segmentsIntersect,
+  thumbEvidence,
   wristsClose,
   type Landmark,
   type PoseLandmark,
@@ -57,6 +58,29 @@ describe("penEvidence", () => {
   it("curled-but-not-fist gestures stay neutral rather than faking a release", () => {
     // Thumb_Up is a folded hand; calling it "open" would drop strokes.
     expect(penEvidence([{ categoryName: "Thumb_Up", score: 0.7 }])).toEqual(NO_EVIDENCE);
+  });
+});
+
+describe("thumbEvidence", () => {
+  it("reads a recognized 👍 as for-evidence at the model's confidence", () => {
+    expect(thumbEvidence([{ categoryName: "Thumb_Up", score: 0.85 }])).toEqual({
+      fist: 0.85,
+      open: 0,
+    });
+  });
+
+  it("reads any other named gesture as against-evidence", () => {
+    for (const name of ["Closed_Fist", "Open_Palm", "Victory", "Pointing_Up", "Thumb_Down"]) {
+      expect(thumbEvidence([{ categoryName: name, score: 0.8 }])).toEqual({
+        fist: 0,
+        open: 0.8,
+      });
+    }
+  });
+
+  it("an unreadable hand is no evidence either way — the latch decays it", () => {
+    expect(thumbEvidence([{ categoryName: "None", score: 0.6 }])).toEqual(NO_EVIDENCE);
+    expect(thumbEvidence([])).toEqual(NO_EVIDENCE);
   });
 });
 

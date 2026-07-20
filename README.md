@@ -15,7 +15,8 @@ the browser — every glowing pulse you see is real math.
 - **Hand gestures (webcam, optional):** raise a hand ✋ and hold it — a
   progress ring fills over 5 seconds, then you're in. ✊ a closed fist is
   pen-down, ✋ an open hand lifts the pen to reposition between strokes,
-  and crossing both arms in an ✕ clears the pad. The drawing auto-fires
+  a held 👍 switches brains, and crossing both arms in an ✕ clears the
+  pad. The drawing auto-fires
   once the pen stays up. Tuned for a camera 2+ meters away: gestures are
   arm-scale (no finger-counting poses), fist/open only register when
   clearly clenched/splayed, tracking blips get a grace window, and hands
@@ -31,7 +32,7 @@ the browser — every glowing pulse you see is real math.
 - **Architecture playground (brain swap):** four pre-trained brains ship in
   the app — Straight-through `784→10` (92.2%), Tiny `784→8→10` (93.0%),
   Classic `784→16→16→10` (95.6%), and Wide `784→32→32→10` (97.3%). Pick a
-  brain card (or hold a raised ✋ for 2s with gestures) and the network
+  brain card (or hold a 👍 for 1.5s with gestures) and the network
   visibly *rewires* — the middle implodes and the new topology cascades in
   while the input plane and output column hold still — then the same digit
   re-fires through the new brain with a cross-brain comparison verdict

@@ -111,7 +111,7 @@ export default function Hud({
               </div>
               {gestureActive && !busy && (
                 <div className="hud-panel__gesture">
-                  ✊ draws · ✋ lifts the pen · cross your arms ✕ to clear
+                  ✊ draws · ✋ lifts the pen · 👍 switches brains · cross your arms ✕ to clear
                 </div>
               )}
               <button className="hud-panel__clear" onClick={onClear} disabled={busy}>
@@ -131,9 +131,9 @@ export default function Hud({
                     background: `conic-gradient(var(--warm) ${wakeProgress * 360}deg, rgba(80, 110, 180, 0.22) 0deg)`,
                   }}
                 />
-                <span className="wake-ring__hand">✋</span>
+                <span className="wake-ring__hand">👍</span>
               </div>
-              <div className="wake-ring__label">Hold to switch brains…</div>
+              <div className="wake-ring__label">Keep that 👍 up…</div>
             </div>
           )}
           <aside className="hud-output">
