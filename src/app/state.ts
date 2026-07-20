@@ -35,7 +35,8 @@ export type AppEvent =
   | { type: "userActive" }
   | { type: "strokeStart" }
   | { type: "clear" }
-  | { type: "fire"; summary: InferenceSummary }
+  | { type: "fire" }
+  | { type: "resultReady"; summary: InferenceSummary }
   | { type: "cinematicDone" }
   | { type: "selectBrain"; id: string }
   | { type: "morphDone" }
@@ -59,13 +60,21 @@ export function reduce(state: AppState, event: AppEvent): AppState {
         : state;
 
     case "fire":
+      // The verdict clears at fire and returns via resultReady — the app
+      // genuinely doesn't know the answer until the output layer computes.
       if (state.mode === "attract") {
-        return { mode: "attract", current: event.summary, brainId };
+        return { mode: "attract", current: null, brainId };
       }
       if (state.mode === "draw" || state.mode === "result") {
-        return { mode: "infer", current: event.summary, brainId };
+        return { mode: "infer", current: null, brainId };
       }
       return state; // already inferring or morphing — input locked
+
+    case "resultReady":
+      if (state.mode === "infer" || state.mode === "result" || state.mode === "attract") {
+        return { mode: state.mode, current: event.summary, brainId };
+      }
+      return state; // superseded by a morph/reset while the wave was in flight
 
     case "cinematicDone":
       return state.mode === "infer"

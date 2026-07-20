@@ -28,15 +28,14 @@ describe("app state machine", () => {
     expect(reduce(initialState, { type: "userActive" }).mode).toBe("draw");
   });
 
-  it("attract fire stays in attract but records the inference", () => {
-    const next = reduce(initialState, { type: "fire", summary });
-    expect(next.mode).toBe("attract");
-    expect(next.current).toBe(summary);
+  it("attract fire stays in attract, clearing the old verdict", () => {
+    const next = reduce(at("attract", summary), { type: "fire" });
+    expect(next).toEqual(at("attract"));
   });
 
-  it("draw → infer on fire", () => {
-    const next = reduce(at("draw"), { type: "fire", summary });
-    expect(next).toEqual(at("infer", summary));
+  it("draw → infer on fire, clearing the old verdict until resultReady", () => {
+    const next = reduce(at("draw"), { type: "fire" });
+    expect(next).toEqual(at("infer"));
   });
 
   it("infer → result on cinematicDone, keeping the inference", () => {
@@ -49,12 +48,12 @@ describe("app state machine", () => {
   });
 
   it("result → infer on refire (amended drawing)", () => {
-    expect(reduce(at("result", summary), { type: "fire", summary }).mode).toBe("infer");
+    expect(reduce(at("result", summary), { type: "fire" }).mode).toBe("infer");
   });
 
   it("locks input during infer", () => {
     const infer = at("infer", summary);
-    expect(reduce(infer, { type: "fire", summary })).toBe(infer);
+    expect(reduce(infer, { type: "fire" })).toBe(infer);
     expect(reduce(infer, { type: "clear" })).toBe(infer);
     expect(reduce(infer, { type: "strokeStart" })).toBe(infer);
     expect(reduce(infer, { type: "userActive" })).toBe(infer);
@@ -74,6 +73,26 @@ describe("app state machine", () => {
   it("idleTimeout in attract is a no-op (no state churn)", () => {
     const attract = at("attract", summary);
     expect(reduce(attract, { type: "idleTimeout" })).toBe(attract);
+  });
+
+  it("resultReady records the verdict when the output layer computes", () => {
+    expect(reduce(at("infer"), { type: "resultReady", summary })).toEqual(
+      at("infer", summary)
+    );
+    expect(reduce(at("attract"), { type: "resultReady", summary })).toEqual(
+      at("attract", summary)
+    );
+    // cinematicDone can race ahead of a stalled rAF — the verdict still lands
+    expect(reduce(at("result"), { type: "resultReady", summary })).toEqual(
+      at("result", summary)
+    );
+  });
+
+  it("resultReady is ignored where no pass can be in flight", () => {
+    const draw = at("draw");
+    expect(reduce(draw, { type: "resultReady", summary })).toBe(draw);
+    const morph = at("morph", null, "wide");
+    expect(reduce(morph, { type: "resultReady", summary })).toBe(morph);
   });
 });
 
@@ -117,7 +136,7 @@ describe("brain swapping", () => {
 
   it("morph locks drawing input", () => {
     const morph = at("morph", null, "wide");
-    expect(reduce(morph, { type: "fire", summary })).toBe(morph);
+    expect(reduce(morph, { type: "fire" })).toBe(morph);
     expect(reduce(morph, { type: "strokeStart" })).toBe(morph);
     expect(reduce(morph, { type: "clear" })).toBe(morph);
   });
