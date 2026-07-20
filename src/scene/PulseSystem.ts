@@ -180,15 +180,6 @@ export class PulseSystem {
     this.signalAttr.needsUpdate = true;
   }
 
-  /** One-shot loading of a completed pass — SceneManager still calls this
-   *  until the staged drive lands; removed in the SceneManager task. */
-  fire(activations: Float32Array[], nowSeconds: number): void {
-    this.beginFire(nowSeconds);
-    for (let stage = 0; stage < this.layout.edges.length; stage++) {
-      this.loadStage(stage, activations[stage]);
-    }
-  }
-
   update(nowSeconds: number): void {
     this.material.uniforms.uTime.value = nowSeconds;
   }

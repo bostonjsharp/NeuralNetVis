@@ -9,6 +9,7 @@ import {
   startLevelFor,
 } from "./adaptiveQuality";
 import type { ForwardResult } from "../nn/inference";
+import type { StagedPass } from "../nn/stagedPass";
 import type { Net } from "../nn/weights";
 import { CameraRig, type CameraMode } from "./CameraRig";
 import { ConnectionMesh } from "./ConnectionMesh";
@@ -21,6 +22,7 @@ import {
   neuronReveal,
   smoothstep,
   stageGlow,
+  stepsDue,
   winnerFlare,
 } from "./fire";
 import { InputPlane } from "./InputPlane";
@@ -33,8 +35,12 @@ import { Starfield } from "./Starfield";
 import { WinnerFlare } from "./WinnerFlare";
 
 export interface SceneApi {
-  /** Start the forward-pass cinematic for a computed inference. */
-  fire(result: ForwardResult): void;
+  /**
+   * Start the forward-pass cinematic. The pass is computed layer-by-layer as
+   * the pulse waves land; onResult fires when the output layer computes —
+   * or never, if a new fire/brain-swap supersedes this pass first.
+   */
+  fire(pass: StagedPass, onResult: (result: ForwardResult) => void): void;
   setMode(mode: CameraMode): void;
   /** Live-mirror pixels onto the input plane (e.g. while drawing). */
   setInputPixels(pixels: Float32Array): void;
@@ -142,9 +148,15 @@ export function createScene(
 
   let layerCounts = layout.layerPositions.map((p) => p.length / 3);
 
-  // Active cinematic (persists after completion so the last result stays lit)
+  // Active cinematic. The pass computes layer-by-layer as waves land;
+  // fireResult exists only once the final layer has computed (and persists
+  // after completion so the last result stays lit). normalized[layer] exists
+  // only for layers the pass has reached.
   let fireStart = -1e9;
+  let firePass: StagedPass | null = null;
+  let fireOnResult: ((result: ForwardResult) => void) | null = null;
   let fireResult: ForwardResult | null = null;
+  let stepsTaken = 0;
   let normalized: Float32Array[] = [];
 
   // Active brain-swap morph
@@ -204,6 +216,39 @@ export function createScene(
     return smoothstep(0, 0.55, morph.u - stagger);
   }
 
+  /** Execute the matmuls whose incoming waves have landed. A stalled tab
+   *  (rAF gap) catches up in order here rather than skipping layers. */
+  function advanceStagedPass(tSinceFire: number): void {
+    if (!firePass) return;
+    const due = stepsDue(fire, tSinceFire);
+    while (firePass && stepsTaken < due) {
+      firePass.step();
+      stepsTaken++;
+      const layerIdx = stepsTaken; // activations[layerIdx] was just computed
+      const isLast = layerIdx === layerCounts.length;
+      // Normalize for display brightness: output follows probabilities,
+      // hidden layers follow activations (each scaled by its layer max).
+      const values = isLast ? firePass.result!.probs : firePass.activations[layerIdx];
+      let max = 0;
+      for (let i = 0; i < values.length; i++) max = Math.max(max, values[i]);
+      const norm = max > 0 ? 1 / max : 0;
+      normalized[layerIdx - 1] = Float32Array.from(values, (v) => v * norm);
+      if (isLast) {
+        fireResult = firePass.result;
+        flare.setTarget(neurons.positionOf(layerCounts.length - 1, fireResult!.argmax));
+        const deliver = fireOnResult;
+        firePass = null;
+        fireOnResult = null;
+        deliver?.(fireResult!);
+      } else {
+        // The wave carrying these values departs at stageStart[layerIdx],
+        // after this landing — its particles stay invisible until then, so
+        // loading at compute time leaks nothing.
+        pulses.loadStage(layerIdx, firePass.activations[layerIdx]);
+      }
+    }
+  }
+
   function updateNeurons(
     tSinceFire: number,
     morph: { phase: "out" | "in"; u: number } | null
@@ -218,14 +263,15 @@ export function createScene(
         let brightness = 0.07 + shimmer;
         let scale = 1;
         let warmth = 0;
-        if (fireResult) {
+        const levels = normalized[layer]; // exists only once this layer computed
+        if (levels) {
           const reveal = neuronReveal(fire, tSinceFire, layer, i, count);
           // Perceptual curve: keep weak activations visibly dimmer than
           // strong ones instead of letting bloom crush everything to white.
-          const level = Math.pow(normalized[layer][i], 1.6);
+          const level = Math.pow(levels[i], 1.6);
           brightness += reveal * level * 1.05;
           scale = neuronPop(fire, tSinceFire, layer, i, count) * (1 + 0.22 * level * reveal);
-          if (layer === lastLayer && i === fireResult.argmax) {
+          if (layer === lastLayer && fireResult && i === fireResult.argmax) {
             brightness += 0.4 * flareEnv;
             scale += 0.3 * flareEnv;
             warmth = Math.max(flareEnv, 0.4 * reveal * level);
@@ -274,22 +320,32 @@ export function createScene(
       }
     }
 
+    advanceStagedPass(tSinceFire);
+    const fireActive = firePass !== null || fireResult !== null;
+
     rig.update(elapsed, dt);
     starfield.update(elapsed);
     pulses.update(elapsed);
-    inputPlane.setBrightness(fireResult ? inputRamp(tSinceFire) : 1);
+    inputPlane.setBrightness(fireActive ? inputRamp(tSinceFire) : 1);
     connections.setFade(edgeFade);
     // Stage 0's many lines share one small screen region — halve its glow lift
     connections.setStageGlow(
       layout.edges.map((_, stage) =>
-        fireResult ? (stage === 0 ? 0.5 : 1) * stageGlow(fire, tSinceFire, stage) : 0
+        fireActive ? (stage === 0 ? 0.5 : 1) * stageGlow(fire, tSinceFire, stage) : 0
       )
     );
     const flareEnv = updateNeurons(tSinceFire, morph);
+    // Glyphs know nothing until the output layer actually computes — the
+    // answer must be earned by the wavefront, never leaked ahead of it.
     const outputReveal = fireResult
       ? neuronReveal(fire, tSinceFire, layerCounts.length - 1, 0, 1)
       : 0;
-    glyphs.update(fireResult ? fireResult.probs : null, Math.max(outputReveal, fireResult ? 0.35 : 0.2), fireResult?.argmax ?? 0, flareEnv);
+    glyphs.update(
+      fireResult ? fireResult.probs : null,
+      fireResult ? Math.max(outputReveal, 0.2) : 0.2,
+      fireResult?.argmax ?? 0,
+      flareEnv
+    );
     flare.update(flareEnv, camera);
     post.bloom.strength = BLOOM_BASE_STRENGTH + 0.12 * flareEnv;
 
@@ -299,35 +355,28 @@ export function createScene(
   frame();
 
   return {
-    fire(result) {
+    fire(pass, onResult) {
       // The morph advances on rAF frames while callers schedule re-fires on
       // wall-clock timers — under load a fire can arrive mid-morph. Land the
-      // pending swap first so the scene's topology matches the result.
+      // pending swap first so the scene's topology matches the pass.
       if (morphState) {
         if (!morphState.swapped) swapSubsystems(morphState.net, morphState.options);
         const { onDone } = morphState;
         morphState = null;
         onDone();
       }
-      // A result computed for a different topology than the built scene
-      // must never animate — it would index out of every buffer.
-      if (result.activations.length - 1 !== layerCounts.length) return;
-      fireResult = result;
+      // A pass built for a different topology than the built scene must
+      // never animate — it would index out of every buffer.
+      if (pass.net.shape.length - 1 !== layerCounts.length) return;
+      firePass = pass;
+      fireOnResult = onResult;
+      fireResult = null; // the old verdict is about the old input
+      stepsTaken = 0;
+      normalized = [];
       fireStart = elapsed;
-      // Normalize each layer's activations to 0..1 for display brightness
-      normalized = layerCounts.map((_, j) => {
-        const layerIdx = j + 1; // activations[0] is the input plane
-        const source = result.activations[layerIdx];
-        const values =
-          j === layerCounts.length - 1 ? result.probs : source; // output brightness follows probabilities
-        let max = 0;
-        for (let i = 0; i < values.length; i++) max = Math.max(max, values[i]);
-        const norm = max > 0 ? 1 / max : 0;
-        return Float32Array.from(values, (v) => v * norm);
-      });
-      inputPlane.setPixels(result.activations[0]);
-      pulses.fire(result.activations, elapsed);
-      flare.setTarget(neurons.positionOf(layerCounts.length - 1, result.argmax));
+      inputPlane.setPixels(pass.activations[0]);
+      pulses.beginFire(elapsed);
+      pulses.loadStage(0, pass.activations[0]); // the input is known at t=0
     },
     setMode(mode) {
       rig.setMode(mode);
@@ -339,8 +388,13 @@ export function createScene(
         if (!morphState.swapped) swapSubsystems(morphState.net, morphState.options);
         morphState.onDone();
       }
-      // A lit result about the old brain must not survive the swap
+      // A lit result — or in-flight pass — about the old brain must not
+      // survive the swap; a superseded pass's onResult never fires.
+      firePass = null;
+      fireOnResult = null;
       fireResult = null;
+      stepsTaken = 0;
+      normalized = [];
       fireStart = -1e9;
       morphState = { start: elapsed, net: nextNet, options, onDone, swapped: false };
     },
