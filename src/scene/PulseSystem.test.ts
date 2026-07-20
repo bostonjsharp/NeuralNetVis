@@ -59,7 +59,8 @@ describe("PulseSystem staged loading", () => {
   it("writes both particle slots of an edge with the same clamped signal", () => {
     const { layout, pulses, signals, stage0End } = build();
     pulses.beginFire(0);
-    pulses.loadStage(1, Float32Array.from([100, 0, 0, 0])); // huge source → clamps
+    // layer-max norm cancels the huge source; both slots share one in-range signal
+    pulses.loadStage(1, Float32Array.from([100, 0, 0, 0]));
     const arr = signals().slice(stage0End);
     expect(arr.length).toBe(layout.edges[1].count * PARTICLES_PER_EDGE);
     for (let e = 0; e < layout.edges[1].count; e++) {

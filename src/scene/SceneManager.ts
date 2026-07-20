@@ -22,9 +22,9 @@ import {
   neuronReveal,
   smoothstep,
   stageGlow,
-  stepsDue,
   winnerFlare,
 } from "./fire";
+import { createFireDriver, type FireDriver } from "./fireDriver";
 import { InputPlane } from "./InputPlane";
 import { buildLayout, type LayoutOptions, type NetworkLayout } from "./NetworkLayout";
 import { NeuronField } from "./NeuronField";
@@ -156,7 +156,7 @@ export function createScene(
   let firePass: StagedPass | null = null;
   let fireOnResult: ((result: ForwardResult) => void) | null = null;
   let fireResult: ForwardResult | null = null;
-  let stepsTaken = 0;
+  let fireDriver: FireDriver | null = null;
   let normalized: Float32Array[] = [];
 
   // Active brain-swap morph
@@ -216,40 +216,31 @@ export function createScene(
     return smoothstep(0, 0.55, morph.u - stagger);
   }
 
-  /** Execute the matmuls whose incoming waves have landed. A stalled tab
-   *  (rAF gap) catches up in order here rather than skipping layers. */
-  function advanceStagedPass(tSinceFire: number): void {
-    if (!firePass) return;
-    const due = stepsDue(fire, tSinceFire);
-    while (firePass && stepsTaken < due) {
-      firePass.step();
-      stepsTaken++;
-      const layerIdx = stepsTaken; // activations[layerIdx] was just computed
-      const isLast = layerIdx === layerCounts.length;
-      // Normalize for display brightness: output follows probabilities,
-      // hidden layers follow activations (each scaled by its layer max).
-      const values = isLast ? firePass.result!.probs : firePass.activations[layerIdx];
-      let max = 0;
-      for (let i = 0; i < values.length; i++) max = Math.max(max, values[i]);
-      const norm = max > 0 ? 1 / max : 0;
-      normalized[layerIdx - 1] = Float32Array.from(values, (v) => v * norm);
-      if (isLast) {
-        fireResult = firePass.result;
-        flare.setTarget(neurons.positionOf(layerCounts.length - 1, fireResult!.argmax));
-        const deliver = fireOnResult;
+  /** Build a driver for a freshly started pass — the advance/delivery logic
+   *  itself lives in fireDriver.ts (pure, unit-tested); these hooks are this
+   *  module's only stake in it: store the normalized display values, load
+   *  the next pulse stage, and deliver the app's callback exactly once. */
+  function startFireDriver(pass: StagedPass): FireDriver {
+    return createFireDriver(fire, pass, layerCounts.length, {
+      onLayer(layerIndex, normalizedValues, sourceActivations) {
+        normalized[layerIndex] = normalizedValues;
+        if (layerIndex < layerCounts.length - 1) {
+          // The wave carrying these values departs at stageStart[layerIndex+1],
+          // after this landing — its particles stay invisible until then, so
+          // loading at compute time leaks nothing.
+          pulses.loadStage(layerIndex + 1, sourceActivations);
+        }
+      },
+      onComplete(result) {
+        fireResult = result;
+        flare.setTarget(neurons.positionOf(layerCounts.length - 1, result.argmax));
         firePass = null;
+        fireDriver = null;
+        const deliver = fireOnResult;
         fireOnResult = null;
-        deliver?.(fireResult!);
-        // The callback may synchronously start a new fire(); this pass is
-        // finished either way — never resume the loop against a stale `due`.
-        return;
-      } else {
-        // The wave carrying these values departs at stageStart[layerIdx],
-        // after this landing — its particles stay invisible until then, so
-        // loading at compute time leaks nothing.
-        pulses.loadStage(layerIdx, firePass.activations[layerIdx]);
-      }
-    }
+        deliver?.(result);
+      },
+    });
   }
 
   function updateNeurons(
@@ -323,7 +314,7 @@ export function createScene(
       }
     }
 
-    advanceStagedPass(tSinceFire);
+    fireDriver?.advance(tSinceFire);
     const fireActive = firePass !== null || fireResult !== null;
 
     rig.update(elapsed, dt);
@@ -369,14 +360,30 @@ export function createScene(
         onDone();
       }
       // A pass built for a different topology than the built scene must
-      // never animate — it would index out of every buffer.
-      if (pass.net.shape.length - 1 !== layerCounts.length) return;
+      // never animate — it would index out of every buffer. Depth alone
+      // isn't enough: two same-depth brains can still disagree on width.
+      const shapeMatches =
+        pass.net.shape.length - 1 === layerCounts.length &&
+        layerCounts.every((count, l) => pass.net.shape[l + 1] === count);
+      if (!shapeMatches) {
+        console.warn(
+          `fire: pass shape [${pass.net.shape}] doesn't match the built scene topology — dropping`
+        );
+        return;
+      }
+      // A pass already stepped elsewhere would desync the driver's own step
+      // count from its activations and throw inside the rAF loop, freezing
+      // the wall — refuse anything but a fresh, unstepped pass.
+      if (pass.activations.length !== 1) {
+        console.warn("fire: pass has already been stepped — dropping");
+        return;
+      }
       firePass = pass;
       fireOnResult = onResult;
       fireResult = null; // the old verdict is about the old input
-      stepsTaken = 0;
       normalized = [];
       fireStart = elapsed;
+      fireDriver = startFireDriver(pass);
       inputPlane.setPixels(pass.activations[0]);
       pulses.beginFire(elapsed);
       pulses.loadStage(0, pass.activations[0]); // the input is known at t=0
@@ -396,7 +403,7 @@ export function createScene(
       firePass = null;
       fireOnResult = null;
       fireResult = null;
-      stepsTaken = 0;
+      fireDriver = null;
       normalized = [];
       fireStart = -1e9;
       morphState = { start: elapsed, net: nextNet, options, onDone, swapped: false };
