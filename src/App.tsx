@@ -71,8 +71,10 @@ export default function App() {
 
   // Scene lifecycle — the one place WebGL is born and dies
   useEffect(() => {
-    const quality =
-      new URLSearchParams(window.location.search).get("quality") === "low" ? "low" : "high";
+    // Default "auto": measured frame times govern the effect ladder. An
+    // explicit ?quality=high|low pins a rung for A/B comparisons.
+    const param = new URLSearchParams(window.location.search).get("quality");
+    const quality = param === "low" || param === "high" ? param : "auto";
     sceneRef.current = createScene(
       canvasRef.current!,
       getVariant(DEFAULT_VARIANT_ID).net,
@@ -291,15 +293,26 @@ export default function App() {
     // the camera at load, keep retrying instead of giving up forever.
     let retryTimer = 0;
     const attempt = () => {
-      startHandTracking(onGesture, {
-        attachVideo: (video) => {
-          debugDataRef.current.video = video;
+      startHandTracking(
+        onGesture,
+        {
+          attachVideo: (video) => {
+            debugDataRef.current.video = video;
+          },
+          wantFrames: () => debugOpenRef.current,
+          onFrame: (frame) => {
+            debugDataRef.current.frame = frame;
+          },
         },
-        wantFrames: () => debugOpenRef.current,
-        onFrame: (frame) => {
-          debugDataRef.current.frame = frame;
-        },
-      })
+        {
+          // In attract mode the only gesture that matters is a 5-second
+          // hold — ~30Hz reads it fine and halves inference GPU load,
+          // leaving the attract cinematic its full frame budget. Strokes
+          // get every camera frame.
+          captureIntervalMs: () =>
+            stateRef.current.mode === "attract" ? 33 : 0,
+        }
+      )
         .then((stop) => {
           if (cancelled) stop();
           else {

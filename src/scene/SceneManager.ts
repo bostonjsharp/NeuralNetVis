@@ -1,6 +1,13 @@
 import * as THREE from "three";
 import { STAGE_HEIGHT, STAGE_WIDTH } from "../app/constants";
 import { perf } from "../app/perf";
+import { stageScale } from "../hud/Stage";
+import {
+  AdaptiveQuality,
+  QUALITY_LADDER,
+  renderResolution,
+  startLevelFor,
+} from "./adaptiveQuality";
 import type { ForwardResult } from "../nn/inference";
 import type { Net } from "../nn/weights";
 import { CameraRig, type CameraMode } from "./CameraRig";
@@ -54,7 +61,7 @@ const MORPH_TOTAL_S = 1.6;
 export function createScene(
   canvas: HTMLCanvasElement,
   net: Net,
-  quality: "high" | "low" = "high"
+  quality: "auto" | "high" | "low" = "auto"
 ): SceneApi {
   let layout: NetworkLayout = buildLayout(net);
   let fire = makeFireTimeline(layout.edges.length);
@@ -68,8 +75,29 @@ export function createScene(
     antialias: false, // MSAA happens on the composer's render target
     powerPreference: "high-performance",
   });
-  renderer.setPixelRatio(1); // the wall is exactly 2736×1216 — never oversample
-  renderer.setSize(STAGE_WIDTH, STAGE_HEIGHT, false);
+  renderer.setPixelRatio(1); // buffer sizes are computed explicitly below
+
+  // Quality is measured, not assumed: start at the requested rung and let
+  // sustained frame times walk it down (see adaptiveQuality.ts). An
+  // explicit ?quality= pin never moves.
+  const adaptive = new AdaptiveQuality({
+    startLevel: startLevelFor(quality),
+    locked: quality !== "auto",
+  });
+
+  const currentResolution = () =>
+    renderResolution(
+      stageScale(window.innerWidth, window.innerHeight),
+      window.devicePixelRatio || 1,
+      QUALITY_LADDER[adaptive.level].renderScale
+    );
+
+  {
+    const { width, height } = currentResolution();
+    // updateStyle false: CSS keeps the canvas at the wall's 2736×1216 layout
+    // size; only the drawing buffer shrinks to the displayed pixel count.
+    renderer.setSize(width, height, false);
+  }
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050510);
@@ -88,7 +116,29 @@ export function createScene(
   scene.add(pulses.points, glyphs.group, flare.mesh);
 
   const rig = new CameraRig(camera);
-  const post = createPostFx(renderer, scene, camera, STAGE_WIDTH, STAGE_HEIGHT, quality);
+  let post = createPostFx(
+    renderer,
+    scene,
+    camera,
+    renderer.domElement.width,
+    renderer.domElement.height,
+    QUALITY_LADDER[adaptive.level]
+  );
+
+  function applyQuality(rebuildPost: boolean): void {
+    const { width, height } = currentResolution();
+    renderer.setSize(width, height, false);
+    if (rebuildPost) {
+      // MSAA sample count is baked into the render target — rebuild the chain
+      post.dispose();
+      post = createPostFx(renderer, scene, camera, width, height, QUALITY_LADDER[adaptive.level]);
+    } else {
+      post.setSize(width, height);
+    }
+  }
+
+  const onResize = () => applyQuality(false);
+  window.addEventListener("resize", onResize);
 
   let layerCounts = layout.layerPositions.map((p) => p.length / 3);
 
@@ -123,6 +173,22 @@ export function createScene(
   const clock = new THREE.Clock();
   let elapsed = 0;
   let raf = 0;
+  let nextAdaptCheck = 2;
+
+  /** Every couple of seconds, ask the governor whether the measured frame
+   *  times justify dropping a quality rung — and apply it if so. */
+  function maybeAdapt(): void {
+    if (elapsed < nextAdaptCheck) return;
+    nextAdaptCheck = elapsed + 2;
+    const level = adaptive.update(perf.snapshot(), performance.now());
+    if (level === null) return;
+    const q = QUALITY_LADDER[level];
+    console.info(
+      `[quality] frame times over budget — stepping down to level ${level} ` +
+        `(msaa ${q.msaa}, bloom 1/${q.bloomScale}, scale ${q.renderScale})`
+    );
+    applyQuality(true);
+  }
 
   /** Hidden-neuron scale during the morph: implode together, cascade back in. */
   function morphScale(
@@ -228,6 +294,7 @@ export function createScene(
     post.bloom.strength = BLOOM_BASE_STRENGTH + 0.12 * flareEnv;
 
     post.render();
+    maybeAdapt();
   }
   frame();
 
@@ -282,6 +349,7 @@ export function createScene(
     },
     dispose() {
       cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
       disposeContextWatch();
       post.dispose();
       starfield.dispose();

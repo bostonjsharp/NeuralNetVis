@@ -48,8 +48,12 @@ npm test          # vitest suite (inference math, state machine, layout)
 npm run build     # static build -> web/ (footron layout)
 ```
 
-Dev viewports letterbox-scale the wall's fixed 2736×1216 canvas. Add
-`?quality=low` for weaker GPUs (quarter-res bloom, no MSAA).
+Dev viewports letterbox-scale the wall's fixed 2736×1216 canvas; the
+drawing buffer renders at the displayed pixel count, never above it.
+Effect quality is governed by measured frame times — sustained over-budget
+p95 walks down a ladder (MSAA off → quarter-res bloom → 0.75× render
+scale), logged to the console. `?quality=high` or `?quality=low` pins a
+rung and disables adaptation.
 
 ## Retraining the networks
 

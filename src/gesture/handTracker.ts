@@ -18,6 +18,13 @@ export interface HandDebugSink {
   onFrame(frame: HandDebugFrame): void;
 }
 
+export interface HandTrackingOptions {
+  /** Polled per camera frame: minimum ms between inference captures, 0 for
+   *  every frame. Lets the app halve inference load in attract mode (a 5s
+   *  wake hold doesn't need 60Hz) while strokes keep the full rate. */
+  captureIntervalMs?: () => number;
+}
+
 /**
  * Opens the webcam and reports a smoothed, latched gesture state every
  * frame. MediaPipe inference runs in a dedicated worker so it can never
@@ -29,7 +36,8 @@ export interface HandDebugSink {
  */
 export async function startHandTracking(
   onState: (state: GestureState) => void,
-  debug?: HandDebugSink
+  debug?: HandDebugSink,
+  options?: HandTrackingOptions
 ): Promise<() => void> {
   // Ask for 60fps: a fast hand is only blurry because the exposure is long,
   // and a higher frame rate forces the sensor to shorten it. Blur is what
@@ -65,13 +73,13 @@ export async function startHandTracking(
   };
 
   const runInline = () =>
-    startInlinePath(video, assets, onState, debug).then((stop) => {
+    startInlinePath(video, assets, onState, debug, options).then((stop) => {
       if (stopped) stop();
       else stopPath = stop;
     });
 
   try {
-    stopPath = await startWorkerPath(video, assets, onState, debug, () => {
+    stopPath = await startWorkerPath(video, assets, onState, debug, options, () => {
       // Fatal worker error mid-run: the camera is still live — swap the
       // inference engine underneath it without dropping the session.
       if (stopped) return;
@@ -106,6 +114,7 @@ function startWorkerPath(
   assets: VisionAssets,
   onState: (state: GestureState) => void,
   debug: HandDebugSink | undefined,
+  options: HandTrackingOptions | undefined,
   onFatal: () => void
 ): Promise<() => void> {
   if (typeof Worker === "undefined" || typeof createImageBitmap !== "function") {
@@ -164,8 +173,12 @@ function startWorkerPath(
 
     worker.postMessage({ type: "init", ...assets, poseStride: POSE_FRAME_STRIDE });
 
+    let lastCapture = 0;
     const capture = () => {
       if (disposed || busy) return;
+      const now = performance.now();
+      if (now - lastCapture < (options?.captureIntervalMs?.() ?? 0)) return;
+      lastCapture = now;
       busy = true;
       createImageBitmap(video).then(
         (bitmap) => {
@@ -223,13 +236,15 @@ async function startInlinePath(
   video: HTMLVideoElement,
   assets: VisionAssets,
   onState: (state: GestureState) => void,
-  debug?: HandDebugSink
+  debug?: HandDebugSink,
+  options?: HandTrackingOptions
 ): Promise<() => void> {
   const { recognizer, poseLandmarker } = await createVisionTasks(assets, "GPU");
   const pipeline = new FramePipeline();
   let poseFrame = 0;
   let raf = 0;
   let lastVideoTime = -1;
+  let lastCapture = 0;
   let disposed = false;
 
   const loop = () => {
@@ -238,6 +253,8 @@ async function startInlinePath(
     if (video.currentTime === lastVideoTime) return; // no new camera frame yet
     lastVideoTime = video.currentTime;
     const now = performance.now();
+    if (now - lastCapture < (options?.captureIntervalMs?.() ?? 0)) return;
+    lastCapture = now;
     const result = recognizer.recognizeForVideo(video, now);
     perf.recordMark("gesture", performance.now() - now);
     let poseRan = false;

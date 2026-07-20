@@ -563,13 +563,17 @@ body {
 /* ---- brain cards (architecture playground) ---- */
 
 .brain-cards {
+  /* footron reserves the bottom-left corner for its QR-code overlay — the
+     picker sits centered in the free band between the draw panel (ends
+     ~1150px) and the output bars (start ~2310px). */
   position: absolute;
-  left: 64px;
+  left: 1732px;
   bottom: 44px;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 12px;
-  width: 320px;
 }
 
 .brain-cards__title {
@@ -579,18 +583,26 @@ body {
   text-transform: uppercase;
 }
 
+.brain-cards__row {
+  display: flex;
+  flex-direction: row;
+  gap: 14px;
+}
+
 .brain-card {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 6px;
+  width: 200px;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
-  padding: 10px 18px;
+  padding: 14px 12px;
   color: var(--ink);
   font: inherit;
-  font-size: 26px;
-  text-align: left;
+  font-size: 25px;
+  text-align: center;
   cursor: pointer;
   transition: border-color 0.25s, box-shadow 0.25s, opacity 0.25s;
 }
@@ -620,7 +632,6 @@ body {
 
 .brain-card__name {
   font-weight: 600;
-  flex: 1;
 }
 
 .brain-card__acc {
@@ -628,16 +639,37 @@ body {
   font-size: 21px;
 }
 
-/* Attract mode: a slim, read-only strip showing which brain is thinking */
+/* Attract mode: a slim, read-only stack showing which brain is thinking.
+   Bottom-right is free there (the output bars only exist in interactive),
+   and the QR corner stays clear. */
 .brain-cards--readonly {
+  left: auto;
+  right: 44px;
+  bottom: 44px;
+  transform: none;
+  align-items: flex-end;
   width: 260px;
   gap: 8px;
 }
 
+.brain-cards--readonly .brain-cards__row {
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
 .brain-cards--readonly .brain-card {
+  flex-direction: row;
+  width: auto;
+  text-align: left;
+  gap: 16px;
   padding: 6px 14px;
   font-size: 21px;
   opacity: 0.6;
+}
+
+.brain-cards--readonly .brain-card__name {
+  flex: 1;
 }
 
 .brain-cards--readonly .brain-card--active {
@@ -661,9 +693,10 @@ body {
   color: var(--ink-dim);
 }
 
-/* Brain-cycle hold ring sits by the cards, not center stage */
+/* Brain-cycle hold ring hovers just above the picker it acts on */
 .wake-ring-wrap--brain {
   top: auto;
-  bottom: 420px;
-  left: 224px;
+  bottom: 250px;
+  left: 1732px;
+  transform: translateX(-50%);
 }

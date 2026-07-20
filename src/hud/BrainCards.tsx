@@ -19,22 +19,24 @@ export default function BrainCards({ activeId, disabled, readOnly, onSelect }: B
   return (
     <div className={`brain-cards${readOnly ? " brain-cards--readonly" : ""}`}>
       {!readOnly && <div className="brain-cards__title">Pick a brain:</div>}
-      {VARIANTS.map((variant) => (
-        <button
-          key={variant.id}
-          className={`brain-card${variant.id === activeId ? " brain-card--active" : ""}`}
-          disabled={disabled || readOnly}
-          onClick={() => onSelect(variant.id)}
-          aria-label={`switch to the ${variant.label} network`}
-          title={variant.tagline}
-        >
-          <ShapeGlyph variant={variant} />
-          <span className="brain-card__name">{variant.label}</span>
-          <span className="brain-card__acc">
-            {(variant.testAccuracy * 100).toFixed(1)}% accurate
-          </span>
-        </button>
-      ))}
+      <div className="brain-cards__row">
+        {VARIANTS.map((variant) => (
+          <button
+            key={variant.id}
+            className={`brain-card${variant.id === activeId ? " brain-card--active" : ""}`}
+            disabled={disabled || readOnly}
+            onClick={() => onSelect(variant.id)}
+            aria-label={`switch to the ${variant.label} network`}
+            title={variant.tagline}
+          >
+            <ShapeGlyph variant={variant} />
+            <span className="brain-card__name">{variant.label}</span>
+            <span className="brain-card__acc">
+              {(variant.testAccuracy * 100).toFixed(1)}% accurate
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
