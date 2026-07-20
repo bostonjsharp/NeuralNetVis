@@ -66,9 +66,10 @@ Per-frame, **before** `updateNeurons`, the scene advances the pass against its o
   display-brightness array is built then (output layer normalizes probs, hidden layers normalize
   activations, as today). If it is the last layer: set the winner-flare target and invoke
   `onResult(pass.result)`.
-- **At `stageStart[l+1]` (next wave departs):** load stage l+1's pulse signals from the
-  just-computed source activations. Ordering is safe by construction: `layerPop[l] <
-  stageStart[l+1]` in every timeline `makeFireTimeline` can produce.
+- **Stage l+1's pulse signals load at compute time** (the `layerPop[l]` landing that produced
+  their source activations) rather than waiting for `stageStart[l+1]`. This is equivalent and
+  simpler: the stage's particles are time-gated invisible until `stageStart[l+1] > layerPop[l]`,
+  so nothing shows before the wave departs.
 
 A pure helper in `fire.ts`:
 
@@ -107,13 +108,16 @@ Signal math is unchanged — per-edge `source[from] × weight`, normalized by la
 - The `"fire"` event **loses its summary payload**: it only performs the mode transition
   (draw/result → infer, attract stays attract) and clears the previous verdict (`current: null`).
 - New event `{ type: "resultReady", summary: InferenceSummary }`, dispatched from `onResult`, sets
-  `current`. It applies in `infer` and `attract` modes and is ignored elsewhere (a morph or reset
-  that raced the callback wins).
+  `current`. It applies in `infer`, `result` (a wall-clock `cinematicDone` can race ahead of a
+  stalled rAF callback), and `attract` modes, and is ignored elsewhere (a morph or reset that
+  raced the callback wins).
 - `showResultLater` and `barsTimer` are **deleted**. `onResult` does what they did: sets
   `displayed`, and consumes `prevSummaryRef` for the cross-brain comparison verdict. The HUD bars
   land exactly when the output layer computes — no wall-clock mirror of the timeline.
-- `prevSummaryRef` capture moves to result time; the "new pixels invalidate comparison" check stays
-  at fire time in `runInference` (that fact is known immediately).
+- `prevSummaryRef` *capture* stays where it is (the brain-swap effect stashes the on-screen
+  verdict); its *consumption* moves from the deleted timer into `onResult`. The "new pixels
+  invalidate comparison" check stays at fire time in `runInference` (that fact is known
+  immediately).
 - The `cinematicDone` unlock timer (`cinematicTimer`, `timelineFor(...).total`) is unchanged — it
   only unlocks input, and small drift there is harmless.
 - `lastInputRef` / attract-loop re-fire behavior is unchanged; `runInference`'s return value (the
