@@ -114,3 +114,11 @@ export function stageGlow(fire: FireTimeline, t: number, stage: number): number 
   const end = start + fire.stageDur[stage];
   return smoothstep(start - 0.15, start + 0.15, t) * (1 - smoothstep(end, end + 0.4, t));
 }
+
+/** How many destination layers should have been computed by time t —
+ *  one per wave landing. The scene steps its StagedPass up to this. */
+export function stepsDue(fire: FireTimeline, tSinceFire: number): number {
+  let due = 0;
+  for (const pop of fire.layerPop) if (tSinceFire >= pop) due++;
+  return due;
+}

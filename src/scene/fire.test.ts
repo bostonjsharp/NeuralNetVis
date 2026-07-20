@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FIRE, FIRE_TOTAL_MS, makeFireTimeline } from "./fire";
+import { FIRE, FIRE_TOTAL_MS, makeFireTimeline, stepsDue } from "./fire";
 
 describe("makeFireTimeline", () => {
   it("reproduces the hand-tuned classic timeline exactly at 3 stages", () => {
@@ -36,5 +36,32 @@ describe("makeFireTimeline", () => {
   it("keeps the legacy FIRE export equal to the 3-stage timeline", () => {
     expect(FIRE).toEqual(makeFireTimeline(3));
     expect(FIRE_TOTAL_MS).toBeCloseTo(4400, 10);
+  });
+});
+
+describe("stepsDue", () => {
+  const fire = makeFireTimeline(3);
+
+  it("is 0 before the first wave lands", () => {
+    expect(stepsDue(fire, 0)).toBe(0);
+    expect(stepsDue(fire, fire.layerPop[0] - 0.01)).toBe(0);
+  });
+
+  it("increments exactly at each layerPop", () => {
+    expect(stepsDue(fire, fire.layerPop[0])).toBe(1);
+    expect(stepsDue(fire, fire.layerPop[1] - 0.01)).toBe(1);
+    expect(stepsDue(fire, fire.layerPop[1])).toBe(2);
+    expect(stepsDue(fire, fire.layerPop[2])).toBe(3);
+  });
+
+  it("stays at the stage count forever after", () => {
+    expect(stepsDue(fire, 1000)).toBe(3);
+  });
+
+  it("handles negative time (before fire) and single-stage timelines", () => {
+    expect(stepsDue(fire, -5)).toBe(0);
+    const single = makeFireTimeline(1);
+    expect(stepsDue(single, single.layerPop[0])).toBe(1);
+    expect(stepsDue(single, 1000)).toBe(1);
   });
 });
