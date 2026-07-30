@@ -123,3 +123,114 @@ export function inkDelta(prev: Float32Array, next: Float32Array): InkDelta {
   }
   return { total, indices };
 }
+
+// ── Ambient sparks ──────────────────────────────────────────────────────
+export const SPARK_POOL_SIZE = 48;
+export const SPARK_MIN_DUR_S = 0.45;
+export const SPARK_MAX_DUR_S = 0.8;
+/** Target concurrent sparks: aimless idle static → stirred while drawing. */
+export const IDLE_CONCURRENCY = 2.5;
+export const EXCITED_CONCURRENCY = 9;
+/** At full excitement, this fraction of spawns hugs recently-inked stage-0 edges. */
+export const INK_BIAS = 0.85;
+/** How many recently-inked pixels are remembered for the bias. */
+export const INK_MEMORY = 64;
+
+export interface SparkSpawn {
+  slot: number;
+  stage: number;
+  edge: number;
+  duration: number;
+  /** Display strength 0..1 — always below pulse-comet brightness. */
+  magnitude: number;
+}
+
+/**
+ * Pure spawn logic for AmbientSparks. Behavioral randomness (where sparks
+ * go) flows through the injected rng so tests are deterministic; a
+ * Poisson-style accumulator (rate × dt) converts target concurrency into
+ * spawn events. The duck envelope multiplies the rate, so ambience thins
+ * out the moment a fire starts.
+ */
+export class SparkScheduler {
+  private readonly busyUntil: Float64Array;
+  /** input pixel → stage-0 edge indices fanning out of it */
+  private readonly pixelEdges = new Map<number, number[]>();
+  private readonly inked: number[] = [];
+  private acc = 0;
+
+  constructor(
+    private readonly edgeCounts: number[],
+    stage0From: Uint16Array,
+    private readonly rng: () => number = Math.random,
+    private readonly poolSize: number = SPARK_POOL_SIZE
+  ) {
+    this.busyUntil = new Float64Array(poolSize).fill(-1e9);
+    for (let e = 0; e < stage0From.length; e++) {
+      const pixel = stage0From[e];
+      let list = this.pixelEdges.get(pixel);
+      if (!list) this.pixelEdges.set(pixel, (list = []));
+      list.push(e);
+    }
+  }
+
+  noteInk(pixelIndices: number[]): void {
+    for (const p of pixelIndices) {
+      this.inked.push(p);
+      if (this.inked.length > INK_MEMORY) this.inked.shift();
+    }
+  }
+
+  clearInk(): void {
+    this.inked.length = 0;
+  }
+
+  update(now: number, dt: number, excitement: number, duck: number): SparkSpawn[] {
+    const concurrency =
+      IDLE_CONCURRENCY + (EXCITED_CONCURRENCY - IDLE_CONCURRENCY) * excitement;
+    const avgDur = (SPARK_MIN_DUR_S + SPARK_MAX_DUR_S) / 2;
+    this.acc += (concurrency / avgDur) * duck * dt;
+    const spawns: SparkSpawn[] = [];
+    while (this.acc >= 1) {
+      this.acc -= 1;
+      const slot = this.freeSlot(now);
+      if (slot === -1) break;
+      const choice = this.choose(excitement);
+      if (!choice) break;
+      const duration =
+        SPARK_MIN_DUR_S + (SPARK_MAX_DUR_S - SPARK_MIN_DUR_S) * this.rng();
+      this.busyUntil[slot] = now + duration;
+      spawns.push({
+        slot,
+        ...choice,
+        duration,
+        magnitude: 0.35 + 0.45 * this.rng(),
+      });
+    }
+    return spawns;
+  }
+
+  private freeSlot(now: number): number {
+    for (let s = 0; s < this.poolSize; s++) if (this.busyUntil[s] <= now) return s;
+    return -1;
+  }
+
+  private choose(excitement: number): { stage: number; edge: number } | null {
+    // While the visitor inks, sparks concentrate where the ink is landing
+    if (this.inked.length > 0 && this.rng() < INK_BIAS * excitement) {
+      const pixel = this.inked[Math.floor(this.rng() * this.inked.length)];
+      const edges = this.pixelEdges.get(pixel);
+      if (edges && edges.length > 0) {
+        return { stage: 0, edge: edges[Math.floor(this.rng() * edges.length)] };
+      }
+    }
+    const total = this.edgeCounts.reduce((a, b) => a + b, 0);
+    if (total === 0) return null;
+    let pick = Math.floor(this.rng() * total);
+    for (let stage = 0; stage < this.edgeCounts.length; stage++) {
+      if (pick < this.edgeCounts[stage]) return { stage, edge: pick };
+      pick -= this.edgeCounts[stage];
+    }
+    return null;
+  }
+}
