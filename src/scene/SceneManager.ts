@@ -11,6 +11,18 @@ import {
 import type { ForwardResult } from "../nn/inference";
 import type { StagedPass } from "../nn/stagedPass";
 import type { Net } from "../nn/weights";
+import {
+  AmbientState,
+  BREATHE_BRIGHTNESS,
+  BREATHE_SCALE,
+  breathe,
+  DRAW_GLOW,
+  duckEnvelope,
+  INK_TO_EXCITEMENT,
+  inkDelta,
+  SparkScheduler,
+} from "./ambient";
+import { AmbientSparks } from "./AmbientSparks";
 import { CameraRig, type CameraMode } from "./CameraRig";
 import { ConnectionMesh } from "./ConnectionMesh";
 import { installContextLossRecovery } from "./contextLossRecovery";
@@ -114,12 +126,20 @@ export function createScene(
   let neurons = new NeuronField(layout);
   let connections = new ConnectionMesh(layout);
   let pulses = new PulseSystem(layout, fire);
+  let sparks = new AmbientSparks(layout);
+  let scheduler = new SparkScheduler(
+    layout.edges.map((set) => set.count),
+    layout.edges[0].from
+  );
+  const ambient = new AmbientState();
+  // Baseline for the ink diff: what the input plane currently shows.
+  const prevPixels = new Float32Array(layout.inputPositions.length / 3);
   // The output column is position-identical across every brain — the glyphs
   // are built once and survive all swaps untouched.
   const glyphs = new OutputGlyphs(layout);
   const flare = new WinnerFlare();
   scene.add(starfield.points, inputPlane.mesh, connections.lines, neurons.mesh);
-  scene.add(pulses.points, glyphs.group, flare.mesh);
+  scene.add(pulses.points, glyphs.group, flare.mesh, sparks.points);
 
   const rig = new CameraRig(camera);
   let post = createPostFx(
@@ -169,16 +189,24 @@ export function createScene(
   } | null = null;
 
   function swapSubsystems(nextNet: Net, options: LayoutOptions): void {
-    scene.remove(neurons.mesh, connections.lines, pulses.points);
+    scene.remove(neurons.mesh, connections.lines, pulses.points, sparks.points);
     neurons.dispose();
     connections.dispose();
     pulses.dispose();
+    sparks.dispose();
     layout = buildLayout(nextNet, options);
     fire = makeFireTimeline(layout.edges.length);
     neurons = new NeuronField(layout);
     connections = new ConnectionMesh(layout);
     pulses = new PulseSystem(layout, fire);
-    scene.add(connections.lines, neurons.mesh, pulses.points);
+    sparks = new AmbientSparks(layout);
+    scheduler = new SparkScheduler(
+      layout.edges.map((set) => set.count),
+      layout.edges[0].from
+    );
+    ambient.excitement = 0;
+    prevPixels.fill(0);
+    scene.add(connections.lines, neurons.mesh, pulses.points, sparks.points);
     layerCounts = layout.layerPositions.map((p) => p.length / 3);
   }
 
@@ -245,7 +273,8 @@ export function createScene(
 
   function updateNeurons(
     tSinceFire: number,
-    morph: { phase: "out" | "in"; u: number } | null
+    morph: { phase: "out" | "in"; u: number } | null,
+    duck: number
   ) {
     const flareEnv = fireResult ? winnerFlare(fire, tSinceFire) : 0;
     const lastLayer = layerCounts.length - 1;
@@ -253,9 +282,10 @@ export function createScene(
       const count = layerCounts[layer];
       for (let i = 0; i < count; i++) {
         const instance = neurons.indexOf(layer, i);
-        const shimmer = 0.02 * Math.sin(elapsed * 1.3 + instance * 0.71);
-        let brightness = 0.07 + shimmer;
-        let scale = 1;
+        const pos = neurons.positionOf(layer, i);
+        const wave = breathe(elapsed, pos.x, pos.y);
+        let brightness = 0.07 + BREATHE_BRIGHTNESS * duck * wave;
+        let scale = 1 + BREATHE_SCALE * duck * (2 * wave - 1);
         let warmth = 0;
         const levels = normalized[layer]; // exists only once this layer computed
         if (levels) {
@@ -317,18 +347,30 @@ export function createScene(
     fireDriver?.advance(tSinceFire);
     const fireActive = firePass !== null || fireResult !== null;
 
-    rig.update(elapsed, dt);
+    ambient.decay(dt);
+    const duck = duckEnvelope(tSinceFire, fire.total, morphState !== null);
+
+    rig.update(elapsed, dt, duck);
     starfield.update(elapsed);
     pulses.update(elapsed);
+    for (const s of scheduler.update(elapsed, dt, ambient.excitement, duck)) {
+      sparks.spawn(s.slot, s.stage, s.edge, elapsed, s.duration, s.magnitude);
+    }
+    sparks.update(elapsed, duck);
     inputPlane.setBrightness(fireActive ? inputRamp(tSinceFire) : 1);
     connections.setFade(edgeFade);
-    // Stage 0's many lines share one small screen region — halve its glow lift
+    // Stage 0's many lines share one small screen region — halve its glow lift.
+    // While the visitor inks, the input wiring warms under the fresh strokes.
     connections.setStageGlow(
-      layout.edges.map((_, stage) =>
-        fireActive ? (stage === 0 ? 0.5 : 1) * stageGlow(fire, tSinceFire, stage) : 0
-      )
+      layout.edges.map((_, stage) => {
+        const cinematic = fireActive
+          ? (stage === 0 ? 0.5 : 1) * stageGlow(fire, tSinceFire, stage)
+          : 0;
+        const draw = stage === 0 ? DRAW_GLOW * ambient.excitement * duck : 0;
+        return cinematic + draw;
+      })
     );
-    const flareEnv = updateNeurons(tSinceFire, morph);
+    const flareEnv = updateNeurons(tSinceFire, morph, duck);
     // Glyphs know nothing until the output layer actually computes — the
     // answer must be earned by the wavefront, never leaked ahead of it.
     const outputReveal = fireResult
@@ -385,6 +427,8 @@ export function createScene(
       fireStart = elapsed;
       fireDriver = startFireDriver(pass);
       inputPlane.setPixels(pass.activations[0]);
+      // A fire is not a stroke: sync the diff baseline without exciting.
+      prevPixels.set(pass.activations[0]);
       pulses.beginFire(elapsed);
       pulses.loadStage(0, pass.activations[0]); // the input is known at t=0
     },
@@ -409,6 +453,14 @@ export function createScene(
       morphState = { start: elapsed, net: nextNet, options, onDone, swapped: false };
     },
     setInputPixels(pixels) {
+      // The scene observes drawing through the calls it already receives:
+      // fresh ink excites the ambience and marks pixels for spark bias.
+      const delta = inkDelta(prevPixels, pixels);
+      prevPixels.set(pixels);
+      if (delta.total > 0) {
+        ambient.bump(delta.total * INK_TO_EXCITEMENT);
+        scheduler.noteInk(delta.indices);
+      }
       inputPlane.setPixels(pixels);
     },
     dispose() {
@@ -421,6 +473,7 @@ export function createScene(
       neurons.dispose();
       connections.dispose();
       pulses.dispose();
+      sparks.dispose();
       glyphs.dispose();
       flare.dispose();
       renderer.dispose();
