@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AmbientState,
   breathe,
   cameraDrift,
   DRIFT_POS_AMP,
@@ -8,6 +9,8 @@ import {
   DUCK_FLOOR,
   DUCK_RELEASE_S,
   duckEnvelope,
+  INK_THRESHOLD,
+  inkDelta,
 } from "./ambient";
 
 describe("cameraDrift", () => {
@@ -77,5 +80,54 @@ describe("duckEnvelope", () => {
   it("is hard 0 while morphing, regardless of fire time", () => {
     expect(duckEnvelope(1e9, TOTAL, true)).toBe(0);
     expect(duckEnvelope(1, TOTAL, true)).toBe(0);
+  });
+});
+
+describe("AmbientState excitement", () => {
+  it("bump clamps to 1", () => {
+    const s = new AmbientState();
+    s.bump(0.7);
+    s.bump(0.7);
+    expect(s.excitement).toBe(1);
+  });
+
+  it("ignores negative bumps", () => {
+    const s = new AmbientState();
+    s.bump(0.5);
+    s.bump(-2);
+    expect(s.excitement).toBe(0.5);
+  });
+
+  it("decays below 0.05 within three time constants", () => {
+    const s = new AmbientState();
+    s.bump(1);
+    for (let i = 0; i < 60 * 4.6; i++) s.decay(1 / 60);
+    expect(s.excitement).toBeLessThan(0.05);
+  });
+});
+
+describe("inkDelta", () => {
+  it("reports total fresh ink and which pixels gained it", () => {
+    const prev = new Float32Array(4);
+    const next = Float32Array.from([0.5, INK_THRESHOLD - 0.01, 0, 0.9]);
+    const d = inkDelta(prev, next);
+    expect(d.total).toBeCloseTo(0.5 + (INK_THRESHOLD - 0.01) + 0.9, 5);
+    // Only gains ≥ INK_THRESHOLD are worth a spark bias
+    expect(d.indices).toEqual([0, 3]);
+  });
+
+  it("clearing the pad (all deltas negative) yields zero — never excites", () => {
+    const prev = Float32Array.from([0.8, 0.3, 0.9, 0]);
+    const next = new Float32Array(4);
+    const d = inkDelta(prev, next);
+    expect(d.total).toBe(0);
+    expect(d.indices).toEqual([]);
+  });
+
+  it("identical frames yield zero", () => {
+    const px = Float32Array.from([0.4, 0.4]);
+    const d = inkDelta(px, px);
+    expect(d.total).toBe(0);
+    expect(d.indices).toEqual([]);
   });
 });

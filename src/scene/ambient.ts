@@ -79,3 +79,47 @@ export function duckEnvelope(
     DUCK_FLOOR + (1 - DUCK_FLOOR) * smoothstep(0, DUCK_RELEASE_S, tSinceFire - fireTotal)
   );
 }
+
+// ── Draw excitement ─────────────────────────────────────────────────────
+export const EXCITEMENT_TAU_S = 1.5;
+/** A pixel's ink gain ≥ this marks it "recently inked" for spark bias. */
+export const INK_THRESHOLD = 0.15;
+/** Scales a stroke event's summed fresh ink into an excitement bump. */
+export const INK_TO_EXCITEMENT = 0.6;
+/** Stage-0 connection glow lift at full excitement (the wiring warms under the ink). */
+export const DRAW_GLOW = 0.15;
+
+/** The scene's one piece of ambient mutable state: how recently/heavily the
+ *  visitor has been inking. Bumped by setInputPixels diffs, decays fast. */
+export class AmbientState {
+  excitement = 0;
+
+  bump(amount: number): void {
+    this.excitement = Math.min(1, this.excitement + Math.max(0, amount));
+  }
+
+  decay(dt: number): void {
+    this.excitement *= Math.exp(-dt / EXCITEMENT_TAU_S);
+  }
+}
+
+export interface InkDelta {
+  /** Sum of positive per-pixel deltas. */
+  total: number;
+  /** Pixels whose gain crossed INK_THRESHOLD, for spark spawn bias. */
+  indices: number[];
+}
+
+/** Positive-only pixel diff. Clearing the pad (deltas ≤ 0) yields zero, so
+ *  clearing never excites the network. */
+export function inkDelta(prev: Float32Array, next: Float32Array): InkDelta {
+  let total = 0;
+  const indices: number[] = [];
+  for (let i = 0; i < next.length; i++) {
+    const d = next[i] - prev[i];
+    if (d <= 0) continue;
+    total += d;
+    if (d >= INK_THRESHOLD) indices.push(i);
+  }
+  return { total, indices };
+}
