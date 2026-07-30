@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { cameraDrift } from "./ambient";
 
 export type CameraMode = "attract" | "interactive";
 
@@ -48,7 +49,7 @@ export class CameraRig {
     this.mode = mode;
   }
 
-  update(elapsed: number, dt: number): void {
+  update(elapsed: number, dt: number, driftAmp = 1): void {
     if (this.mode === "attract") {
       this.curve.getPoint((elapsed / ATTRACT_PERIOD) % 1, this.desiredPosition);
       // Gaze drifts slowly around the network's heart
@@ -58,8 +59,19 @@ export class CameraRig {
         0
       );
     } else {
-      this.desiredPosition.copy(this.interactivePosition);
-      this.desiredTarget.copy(this.interactiveTarget);
+      // Micro-drift keeps the locked framing breathing; the duck envelope
+      // stills the camera during the fire cinematic (stillness = attention).
+      const drift = cameraDrift(elapsed);
+      this.desiredPosition.set(
+        this.interactivePosition.x + drift.px * driftAmp,
+        this.interactivePosition.y + drift.py * driftAmp,
+        this.interactivePosition.z + drift.pz * driftAmp
+      );
+      this.desiredTarget.set(
+        this.interactiveTarget.x + drift.tx * driftAmp,
+        this.interactiveTarget.y + drift.ty * driftAmp,
+        this.interactiveTarget.z
+      );
     }
     // Critically-damped exponential smoothing (frame-rate independent)
     const k = 1 - Math.exp(-1.8 * dt);
