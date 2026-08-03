@@ -16,7 +16,19 @@ import {
   type Landmark,
   type PenPose,
 } from "./handGesture";
-import { forearmsCrossed, POSE, type PoseLandmark } from "./poseGesture";
+import {
+  armOut,
+  forearmsCrossed,
+  pickActiveArm,
+  POSE,
+  POSE_PAD_REACH,
+  poseRaised,
+  reachEvidence,
+  shoulderWidth,
+  wristOf,
+  type PoseLandmark,
+  type Side,
+} from "./poseGesture";
 
 /**
  * The per-frame folding of raw MediaPipe readings into the app's gesture
@@ -39,6 +51,11 @@ export interface GestureState {
   /** Latched 👍 on the primary hand — the brain-switch verb. */
   thumbsUp: boolean;
 }
+
+/** Which signal source produced the frame's state. "close" includes the
+ *  close tier's absence-grace window — the far tier may only engage once
+ *  the close tier has fully released. */
+export type DrivingTier = "close" | "far" | null;
 
 /** Per-frame diagnostics for the dev overlay (G key / ?debug). */
 export interface HandDebugFrame {
@@ -63,6 +80,11 @@ export interface HandDebugFrame {
   /** Pen latch charge (0..1) — how close the pen is to pressing/lifting. */
   charge: number;
   crossed: boolean;
+  tier: DrivingTier;
+  /** Held body pose, for skeleton drawing. */
+  bodyPose: PoseLandmark[] | null;
+  /** Far-tier reach latch readout (the on-site tuning instrument). */
+  farReach: { side: Side; charge: number } | null;
   /** Last state actually emitted to the app. */
   state: GestureState | null;
 }
@@ -91,6 +113,7 @@ export interface PipelineFrameOutput {
   /** State to report to the app — null when nothing should be emitted. */
   state: GestureState | null;
   debug: HandDebugFrame | null;
+  tier: DrivingTier;
 }
 
 export class FramePipeline {
@@ -119,6 +142,24 @@ export class FramePipeline {
   private lastPrimaryPalm: Landmark | null = null;
   private lastBodyPose: PoseLandmark[] | undefined;
   private lastEmitted: GestureState | null = null;
+
+  // ---- far tier: separate instances so tier handoff can't smear state ----
+  private readonly farLatch = new PenLatch();
+  private readonly farArmOutLatch = new PenLatch({
+    press: 0.3,
+    release: 0.5,
+    decay: 0.06,
+    downAt: 0.6,
+    upAt: 0.25,
+  });
+  private readonly farMapper = new PadMapper(POSE_PAD_REACH);
+  private readonly farFilterX = new OneEuroFilter();
+  private readonly farFilterY = new OneEuroFilter();
+  private farSmoothSw = 0;
+  private farActive = false;
+  private farMissed = 0;
+  private activeArm: Side | null = null;
+  private tier: DrivingTier = null;
 
   update(input: PipelineFrameInput): PipelineFrameOutput {
     const { allHands, allGestures, nowMs } = input;
@@ -174,6 +215,11 @@ export class FramePipeline {
               : null,
             charge: this.latch.level(),
             crossed,
+            tier: this.tier,
+            bodyPose: bodyPose ?? null,
+            farReach: this.activeArm
+              ? { side: this.activeArm, charge: this.farLatch.level() }
+              : null,
             state: this.lastEmitted,
           };
         }
@@ -181,8 +227,82 @@ export class FramePipeline {
 
     if (hands.length === 0) {
       if (!this.hadHand) {
+        // Close tier idle → the far tier reads the whole vocabulary from
+        // body pose. Same GestureState out, so nothing downstream can tell.
+        const sw = bodyPose ? shoulderWidth(bodyPose) : 0;
+        const arm = bodyPose && sw > 0 ? pickActiveArm(bodyPose, this.activeArm) : null;
+        if (arm === null) {
+          if (!this.farActive) {
+            this.tier = null;
+            buildDebug?.();
+            return { state: null, debug, tier: null };
+          }
+          // Far dropout: same shape as a vanished hand — bleed the latches,
+          // hold the cursor, report absence only after the grace window.
+          const pose = this.farLatch.update(NO_EVIDENCE);
+          const thumbsUp = this.farArmOutLatch.update(NO_EVIDENCE) === "fist";
+          if (++this.farMissed > ABSENCE_GRACE_FRAMES) {
+            this.resetFar();
+            this.lastFrameTime = 0;
+            this.tier = null;
+            const state = this.emit({
+              present: false,
+              x: this.smoothX,
+              y: this.smoothY,
+              pose: "open",
+              raised: false,
+              crossed: false,
+              thumbsUp: false,
+            });
+            buildDebug?.();
+            return { state, debug, tier: null };
+          }
+          this.tier = "far";
+          const state = this.emit({
+            present: true,
+            x: this.smoothX,
+            y: this.smoothY,
+            pose,
+            raised: false,
+            crossed,
+            thumbsUp,
+          });
+          buildDebug?.();
+          return { state, debug, tier: "far" };
+        }
+        this.farMissed = 0;
+        this.activeArm = arm;
+        this.tier = "far";
+        const wrist = wristOf(bodyPose!, arm);
+        // Smooth the ruler like the close tier smooths hand-span.
+        this.farSmoothSw =
+          this.farSmoothSw === 0 ? sw : this.farSmoothSw + (sw - this.farSmoothSw) * 0.1;
+        const mapped = this.farMapper.update(wrist, this.farSmoothSw);
+        if (!this.farActive) {
+          this.farFilterX.reset();
+          this.farFilterY.reset();
+          this.farActive = true;
+        }
+        const dt = this.lastFrameTime ? (nowMs - this.lastFrameTime) / 1000 : NOMINAL_DT;
+        this.lastFrameTime = nowMs;
+        this.smoothX = this.farFilterX.filter(mapped.x, dt);
+        this.smoothY = this.farFilterY.filter(mapped.y, dt);
+        const pose = this.farLatch.update(reachEvidence(bodyPose!, arm));
+        const thumbsUp =
+          this.farArmOutLatch.update(
+            armOut(bodyPose!, arm) ? { fist: 1, open: 0 } : { fist: 0, open: 1 }
+          ) === "fist";
+        const state = this.emit({
+          present: true,
+          x: this.smoothX,
+          y: this.smoothY,
+          pose,
+          raised: poseRaised(bodyPose!, arm),
+          crossed,
+          thumbsUp,
+        });
         buildDebug?.();
-        return { state: null, debug };
+        return { state, debug, tier: "far" };
       }
       // No hand is not a fist. Bleed the latches down instead of freezing
       // the last pose: a brief dropout rides through, a real absence lifts
@@ -196,6 +316,7 @@ export class FramePipeline {
         this.mapper.reset();
         this.lastFrameTime = 0;
         this.lastPrimaryPalm = null;
+        this.tier = null;
         const state = this.emit({
           present: false,
           x: this.smoothX,
@@ -206,10 +327,11 @@ export class FramePipeline {
           thumbsUp: false,
         });
         buildDebug?.();
-        return { state, debug };
+        return { state, debug, tier: null };
       }
       // Hold the cursor where it was — never invent a position from a model
       // that cannot see through a sleeve.
+      this.tier = "close";
       const state = this.emit({
         present: true,
         x: this.smoothX,
@@ -220,10 +342,12 @@ export class FramePipeline {
         thumbsUp,
       });
       buildDebug?.();
-      return { state, debug };
+      return { state, debug, tier: "close" };
     }
 
     this.missedFrames = 0;
+    if (this.farActive || this.activeArm) this.resetFar();
+    this.tier = "close";
     const primary = hands[primaryIndex];
     const palm = primary.landmarks[PALM];
     this.lastPrimaryPalm = { x: palm.x, y: palm.y };
@@ -255,11 +379,23 @@ export class FramePipeline {
       thumbsUp,
     });
     buildDebug?.();
-    return { state, debug };
+    return { state, debug, tier: "close" };
   }
 
   private emit(state: GestureState): GestureState {
     this.lastEmitted = state;
     return state;
+  }
+
+  private resetFar(): void {
+    this.farActive = false;
+    this.farMissed = 0;
+    this.activeArm = null;
+    this.farLatch.reset();
+    this.farArmOutLatch.reset();
+    this.farMapper.reset();
+    this.farFilterX.reset();
+    this.farFilterY.reset();
+    this.farSmoothSw = 0;
   }
 }
