@@ -1,6 +1,7 @@
-import { FramePipeline } from "./framePipeline";
+import { FramePipeline, type DrivingTier, type PipelineFrameInput } from "./framePipeline";
 import {
   createVisionTasks,
+  STRIDES,
   type VisionTasks,
   type VisionWorkerRequest,
   type VisionWorkerResponse,
@@ -41,14 +42,14 @@ const post = (message: VisionWorkerResponse) =>
 
 let tasks: VisionTasks | null = null;
 let pipeline: FramePipeline | null = null;
-let poseStride = 6;
-let poseFrame = 0;
+let tier: DrivingTier = null;
+let handCountdown = 0;
+let poseCountdown = 0;
 
 self.onmessage = async (e: MessageEvent<VisionWorkerRequest>) => {
   const msg = e.data;
   try {
     if (msg.type === "init") {
-      poseStride = msg.poseStride;
       pipeline = new FramePipeline();
       try {
         tasks = await createVisionTasks(msg, "GPU");
@@ -67,13 +68,23 @@ self.onmessage = async (e: MessageEvent<VisionWorkerRequest>) => {
         bitmap.close();
         return;
       }
-      const gestureStart = performance.now();
-      const result = tasks.recognizer.recognizeForVideo(bitmap, t);
-      const gestureMs = performance.now() - gestureStart;
+      const strides = tier === "close" ? STRIDES.close : STRIDES.far;
+      let allHands: PipelineFrameInput["allHands"] = [];
+      let allGestures: PipelineFrameInput["allGestures"] = [];
+      let gestureMs: number | undefined;
+      if (--handCountdown <= 0) {
+        handCountdown = strides.hand;
+        const gestureStart = performance.now();
+        const result = tasks.recognizer.recognizeForVideo(bitmap, t);
+        gestureMs = performance.now() - gestureStart;
+        allHands = result.landmarks ?? [];
+        allGestures = result.gestures ?? [];
+      }
       let poseRan = false;
       let bodyPose;
       let poseMs: number | undefined;
-      if (tasks.poseLandmarker && poseFrame++ % poseStride === 0) {
+      if (tasks.poseLandmarker && --poseCountdown <= 0) {
+        poseCountdown = strides.pose;
         poseRan = true;
         const poseStart = performance.now();
         bodyPose = tasks.poseLandmarker.detectForVideo(bitmap, t).landmarks?.[0];
@@ -81,13 +92,14 @@ self.onmessage = async (e: MessageEvent<VisionWorkerRequest>) => {
       }
       bitmap.close();
       const out = pipeline.update({
-        allHands: result.landmarks ?? [],
-        allGestures: result.gestures ?? [],
+        allHands,
+        allGestures,
         poseRan,
         bodyPose,
         nowMs: t,
         wantDebug,
       });
+      tier = out.tier;
       post({ type: "state", state: out.state, debug: out.debug, gestureMs, poseMs });
     }
   } catch (err) {

@@ -15,13 +15,15 @@ export interface VisionAssets {
   poseModelUrl: string;
 }
 
-/** Body pose runs every Nth camera frame (~10Hz at a 60fps camera). It only
- *  feeds the ✕ clear, which must be HELD for 800ms — per-frame detection
- *  buys nothing there, and at 60fps it doubles the GPU inference load. The
- *  held result is at most ~83ms stale, an order of magnitude inside the
- *  hold window. The hand model stays per-frame: a stroking fist is fast
- *  and blur-sensitive. */
-export const POSE_FRAME_STRIDE = 6;
+/** Per-tier inference strides. Close tier: hands per-frame (a stroking
+ *  fist is fast and blur-sensitive), pose at ~10Hz — it only feeds the ✕
+ *  there, which must be HELD 800ms. Far tier (or nobody in frame): the
+ *  arrangement inverts — pose feeds the cursor so it runs per-frame, and
+ *  the hand model's only job is noticing someone stepping close. */
+export const STRIDES = {
+  close: { hand: 1, pose: 6 },
+  far: { hand: 4, pose: 1 },
+} as const;
 
 export interface VisionTasks {
   recognizer: GestureRecognizer;
@@ -69,7 +71,6 @@ export async function createVisionTasks(
 
 export interface VisionWorkerInit extends VisionAssets {
   type: "init";
-  poseStride: number;
 }
 
 export interface VisionWorkerFrame {
@@ -88,8 +89,9 @@ export type VisionWorkerResponse =
       type: "state";
       state: GestureState | null;
       debug: HandDebugFrame | null;
-      /** Inference costs measured inside the worker, for the perf overlay. */
-      gestureMs: number;
+      /** Inference costs measured inside the worker, for the perf overlay.
+       *  Absent when the hand model was strided out this frame. */
+      gestureMs?: number;
       poseMs?: number;
     }
   | { type: "error"; message: string };

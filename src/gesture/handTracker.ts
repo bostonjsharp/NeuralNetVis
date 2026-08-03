@@ -1,8 +1,14 @@
 import { perf } from "../app/perf";
-import { FramePipeline, type GestureState, type HandDebugFrame } from "./framePipeline";
+import {
+  FramePipeline,
+  type DrivingTier,
+  type GestureState,
+  type HandDebugFrame,
+  type PipelineFrameInput,
+} from "./framePipeline";
 import {
   createVisionTasks,
-  POSE_FRAME_STRIDE,
+  STRIDES,
   type VisionAssets,
   type VisionWorkerResponse,
 } from "./visionTasks";
@@ -162,7 +168,7 @@ function startWorkerPath(
         resolve(stop);
       } else if (msg.type === "state") {
         busy = false;
-        perf.recordMark("gesture", msg.gestureMs);
+        if (msg.gestureMs !== undefined) perf.recordMark("gesture", msg.gestureMs);
         if (msg.poseMs !== undefined) perf.recordMark("pose", msg.poseMs);
         if (msg.state) onState(msg.state);
         if (msg.debug) debug?.onFrame(msg.debug);
@@ -171,7 +177,7 @@ function startWorkerPath(
       }
     };
 
-    worker.postMessage({ type: "init", ...assets, poseStride: POSE_FRAME_STRIDE });
+    worker.postMessage({ type: "init", ...assets });
 
     let lastCapture = 0;
     const capture = () => {
@@ -241,7 +247,9 @@ async function startInlinePath(
 ): Promise<() => void> {
   const { recognizer, poseLandmarker } = await createVisionTasks(assets, "GPU");
   const pipeline = new FramePipeline();
-  let poseFrame = 0;
+  let tier: DrivingTier = null;
+  let handCountdown = 0;
+  let poseCountdown = 0;
   let raf = 0;
   let lastVideoTime = -1;
   let lastCapture = 0;
@@ -255,24 +263,35 @@ async function startInlinePath(
     const now = performance.now();
     if (now - lastCapture < (options?.captureIntervalMs?.() ?? 0)) return;
     lastCapture = now;
-    const result = recognizer.recognizeForVideo(video, now);
-    perf.recordMark("gesture", performance.now() - now);
+    const strides = tier === "close" ? STRIDES.close : STRIDES.far;
+    let allHands: PipelineFrameInput["allHands"] = [];
+    let allGestures: PipelineFrameInput["allGestures"] = [];
+    if (--handCountdown <= 0) {
+      handCountdown = strides.hand;
+      const gestureStart = performance.now();
+      const result = recognizer.recognizeForVideo(video, now);
+      perf.recordMark("gesture", performance.now() - gestureStart);
+      allHands = result.landmarks ?? [];
+      allGestures = result.gestures ?? [];
+    }
     let poseRan = false;
     let bodyPose;
-    if (poseLandmarker && poseFrame++ % POSE_FRAME_STRIDE === 0) {
+    if (poseLandmarker && --poseCountdown <= 0) {
+      poseCountdown = strides.pose;
       poseRan = true;
       const poseStart = performance.now();
       bodyPose = poseLandmarker.detectForVideo(video, now).landmarks?.[0];
       perf.recordMark("pose", performance.now() - poseStart);
     }
     const out = pipeline.update({
-      allHands: result.landmarks ?? [],
-      allGestures: result.gestures ?? [],
+      allHands,
+      allGestures,
       poseRan,
       bodyPose,
       nowMs: now,
       wantDebug: debug?.wantFrames() ?? false,
     });
+    tier = out.tier;
     if (out.state) onState(out.state);
     if (out.debug) debug?.onFrame(out.debug);
   };
