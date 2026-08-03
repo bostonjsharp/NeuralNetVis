@@ -4,7 +4,8 @@ import {
   FramePipeline,
   type PipelineFrameInput,
 } from "./framePipeline";
-import type { GestureCategory, Landmark, PoseLandmark } from "./handGesture";
+import type { GestureCategory, Landmark } from "./handGesture";
+import type { PoseLandmark } from "./poseGesture";
 
 /** A readable 21-landmark hand: palm at (x, y), wrist `span` below it. */
 const makeHand = (x: number, y: number, span = 0.04): Landmark[] => {

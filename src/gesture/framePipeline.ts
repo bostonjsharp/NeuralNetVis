@@ -1,5 +1,4 @@
 import {
-  forearmsCrossed,
   handSpan,
   isCloseEnough,
   isRaised,
@@ -10,15 +9,14 @@ import {
   penEvidence,
   PenLatch,
   pickPrimaryHand,
-  POSE,
   thumbEvidence,
   WRIST,
   wristsClose,
   type GestureCategory,
   type Landmark,
   type PenPose,
-  type PoseLandmark,
 } from "./handGesture";
+import { forearmsCrossed, POSE, type PoseLandmark } from "./poseGesture";
 
 /**
  * The per-frame folding of raw MediaPipe readings into the app's gesture

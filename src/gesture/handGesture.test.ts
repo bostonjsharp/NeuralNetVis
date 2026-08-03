@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  forearmsCrossed,
   isCloseEnough,
   isRaised,
   NO_EVIDENCE,
@@ -10,12 +9,9 @@ import {
   penEvidence,
   PenLatch,
   pickPrimaryHand,
-  POSE,
-  segmentsIntersect,
   thumbEvidence,
   wristsClose,
   type Landmark,
-  type PoseLandmark,
 } from "./handGesture";
 
 /** Synthetic 21-landmark hand: wrist at origin, fingers along -y. */
@@ -188,58 +184,6 @@ describe("pickPrimaryHand", () => {
       { x: 0.32, y: 0.69 }, // the pen hand, barely moved
     ];
     expect(pickPrimaryHand(palms, last)).toBe(1);
-  });
-});
-
-describe("forearm ✕ detection", () => {
-  it("segmentsIntersect finds a true crossing", () => {
-    expect(
-      segmentsIntersect({ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: 1, y: 0 })
-    ).toBe(true);
-    expect(
-      segmentsIntersect({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 })
-    ).toBe(false);
-  });
-
-  function poseWith(forearms: Record<number, PoseLandmark>): PoseLandmark[] {
-    const pose: PoseLandmark[] = Array.from({ length: 33 }, () => ({
-      x: 0,
-      y: 0,
-      visibility: 1,
-    }));
-    for (const [index, lm] of Object.entries(forearms)) pose[Number(index)] = lm;
-    return pose;
-  }
-
-  it("detects crossed forearms", () => {
-    // Left forearm ╲, right forearm ╱ — crossing mid-chest
-    const pose = poseWith({
-      [POSE.leftElbow]: { x: 0.6, y: 0.6, visibility: 1 },
-      [POSE.leftWrist]: { x: 0.4, y: 0.4, visibility: 1 },
-      [POSE.rightElbow]: { x: 0.4, y: 0.6, visibility: 1 },
-      [POSE.rightWrist]: { x: 0.6, y: 0.4, visibility: 1 },
-    });
-    expect(forearmsCrossed(pose)).toBe(true);
-  });
-
-  it("arms merely parallel do not cross", () => {
-    const pose = poseWith({
-      [POSE.leftElbow]: { x: 0.6, y: 0.6, visibility: 1 },
-      [POSE.leftWrist]: { x: 0.6, y: 0.4, visibility: 1 },
-      [POSE.rightElbow]: { x: 0.4, y: 0.6, visibility: 1 },
-      [POSE.rightWrist]: { x: 0.4, y: 0.4, visibility: 1 },
-    });
-    expect(forearmsCrossed(pose)).toBe(false);
-  });
-
-  it("ignores low-visibility (occluded) arms", () => {
-    const pose = poseWith({
-      [POSE.leftElbow]: { x: 0.6, y: 0.6, visibility: 0.2 },
-      [POSE.leftWrist]: { x: 0.4, y: 0.4, visibility: 1 },
-      [POSE.rightElbow]: { x: 0.4, y: 0.6, visibility: 1 },
-      [POSE.rightWrist]: { x: 0.6, y: 0.4, visibility: 1 },
-    });
-    expect(forearmsCrossed(pose)).toBe(false);
   });
 });
 
