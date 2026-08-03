@@ -291,6 +291,12 @@ async function startInlinePath(
       nowMs: now,
       wantDebug: debug?.wantFrames() ?? false,
     });
+    // A tier flip changes cadence — countdowns left over from the old
+    // tier would delay the new tier's first inference by several frames.
+    if (out.tier !== tier) {
+      handCountdown = 0;
+      poseCountdown = 0;
+    }
     tier = out.tier;
     if (out.state) onState(out.state);
     if (out.debug) debug?.onFrame(out.debug);

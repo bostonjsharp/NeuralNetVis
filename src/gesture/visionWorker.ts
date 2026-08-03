@@ -99,6 +99,12 @@ self.onmessage = async (e: MessageEvent<VisionWorkerRequest>) => {
         nowMs: t,
         wantDebug,
       });
+      // A tier flip changes cadence — countdowns left over from the old
+      // tier would delay the new tier's first inference by several frames.
+      if (out.tier !== tier) {
+        handCountdown = 0;
+        poseCountdown = 0;
+      }
       tier = out.tier;
       post({ type: "state", state: out.state, debug: out.debug, gestureMs, poseMs });
     }
