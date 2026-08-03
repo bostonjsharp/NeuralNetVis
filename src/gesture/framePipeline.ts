@@ -271,6 +271,17 @@ export class FramePipeline {
           return { state, debug, tier: "far" };
         }
         this.farMissed = 0;
+        // A different arm is a new limb, not a moved one: re-anchor the pad
+        // and drop the old arm's charges, or its reach could press the new
+        // arm's pen and the cursor would slam across from the old box.
+        // farSmoothSw survives — the ruler is body-scale, not arm-scale.
+        if (this.activeArm !== null && arm !== this.activeArm) {
+          this.farMapper.reset();
+          this.farFilterX.reset();
+          this.farFilterY.reset();
+          this.farLatch.reset();
+          this.farArmOutLatch.reset();
+        }
         this.activeArm = arm;
         this.tier = "far";
         const wrist = wristOf(bodyPose!, arm);

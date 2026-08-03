@@ -55,11 +55,14 @@ brain-cycle = sideways. No pair can be confused by the detector.
 
 ### Active-arm selection
 
-Sticky, mirroring `pickPrimaryHand`: on acquisition the higher wrist wins;
-afterwards the active arm keeps identity (left/right is stable in pose
-output — no distance matching needed, unlike anonymous hands). Switch only
-when the active wrist's visibility drops below threshold for the grace
-window and the other wrist is visible and raised/extended.
+Sticky, mirroring `pickPrimaryHand`: on acquisition an engaged wrist (raised,
+out, or reaching) beats a merely higher one; afterwards the active arm keeps
+identity (left/right is stable in pose output — no distance matching needed,
+unlike anonymous hands). One exception, a deliberate post-review amendment:
+an engaged other arm takes over immediately once the active arm rests past
+its hip — without it a visitor who swapped hands was locked out until
+tracking dropped. A vanished active wrist hands over only to an engaged arm;
+otherwise the far tier's absence grace runs and selection restarts fresh.
 
 ### `reachEvidence` — pen down at distance
 

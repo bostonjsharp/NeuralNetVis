@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  armEngaged,
   armOut,
+  armResting,
   forearmsCrossed,
   pickActiveArm,
   POSE,
@@ -132,6 +134,13 @@ describe("armOut", () => {
     pose[POSE.leftWrist] = { x: 0.63, y: 0.38, z: -0.4, visibility: 1 };
     expect(armOut(pose, "left")).toBe(false);
   });
+
+  it("rejects a diagonal raise (lateral passes, the vertical bound fails)", () => {
+    const pose = standing();
+    // lateral 1.25 shoulder-widths (> 0.8) but vertical 1.0 (≥ 0.5)
+    pose[POSE.leftWrist] = { x: 0.85, y: 0.15, z: 0, visibility: 1 };
+    expect(armOut(pose, "left")).toBe(false);
+  });
 });
 
 describe("reachEvidence", () => {
@@ -171,11 +180,62 @@ describe("reachEvidence", () => {
   });
 });
 
+describe("armEngaged", () => {
+  it("is true for each far-tier verb — raise, arm-out, reach", () => {
+    const raised = standing();
+    raised[POSE.leftWrist] = { x: 0.62, y: 0.2, z: 0, visibility: 1 };
+    expect(armEngaged(raised, "left")).toBe(true);
+    const out = standing();
+    out[POSE.leftWrist] = { x: 0.85, y: 0.37, z: 0, visibility: 1 };
+    expect(armEngaged(out, "left")).toBe(true);
+    const reaching = standing();
+    reaching[POSE.leftWrist] = { x: 0.6, y: 0.4, z: -0.2, visibility: 1 };
+    expect(armEngaged(reaching, "left")).toBe(true);
+  });
+
+  it("is false for an arm just standing there", () => {
+    expect(armEngaged(standing(), "left")).toBe(false);
+    expect(armEngaged(standing(), "right")).toBe(false);
+  });
+});
+
+describe("armResting", () => {
+  it("is true only when the wrist hangs past the hip", () => {
+    const pose = standing();
+    pose[POSE.leftWrist] = { x: 0.65, y: 0.7, z: 0, visibility: 1 };
+    expect(armResting(pose, "left")).toBe(true);
+    // The standing wrist sits just above the hip line — not yet resting.
+    expect(armResting(standing(), "left")).toBe(false);
+  });
+
+  it("refuses to guess when the hip is unreadable", () => {
+    const pose = standing();
+    pose[POSE.leftWrist] = { x: 0.65, y: 0.7, z: 0, visibility: 1 };
+    pose[POSE.leftHip] = { x: 0.55, y: 0.65, z: 0, visibility: 0.1 };
+    expect(armResting(pose, "left")).toBe(false);
+  });
+});
+
 describe("pickActiveArm", () => {
   it("prefers the higher wrist on first acquisition", () => {
     const pose = standing();
     pose[POSE.rightWrist] = { x: 0.35, y: 0.3, z: 0, visibility: 1 };
     expect(pickActiveArm(pose, null)).toBe("right");
+  });
+
+  it("prefers an engaged wrist over a higher idle one on acquisition", () => {
+    const pose = standing();
+    // Left reaches (engaged) while the idle right wrist happens to sit higher.
+    pose[POSE.leftWrist] = { x: 0.6, y: 0.4, z: -0.2, visibility: 1 };
+    pose[POSE.rightWrist] = { x: 0.35, y: 0.33, z: 0, visibility: 1 };
+    expect(pickActiveArm(pose, null)).toBe("left");
+  });
+
+  it("breaks a both-engaged acquisition by wrist height", () => {
+    const pose = standing();
+    pose[POSE.leftWrist] = { x: 0.62, y: 0.2, z: 0, visibility: 1 };
+    pose[POSE.rightWrist] = { x: 0.38, y: 0.25, z: 0, visibility: 1 };
+    expect(pickActiveArm(pose, null)).toBe("left");
   });
 
   it("stays sticky to the current arm while its wrist reads", () => {
@@ -184,9 +244,32 @@ describe("pickActiveArm", () => {
     expect(pickActiveArm(pose, "left")).toBe("left");
   });
 
-  it("falls back to the other visible wrist, and to null when neither reads", () => {
+  it("lets an engaged arm take over once the current arm rests", () => {
+    const pose = standing();
+    pose[POSE.leftWrist] = { x: 0.65, y: 0.7, z: 0, visibility: 1 }; // past the hip
+    pose[POSE.rightWrist] = { x: 0.35, y: 0.2, z: 0, visibility: 1 }; // raised
+    expect(pickActiveArm(pose, "left")).toBe("right");
+  });
+
+  it("refuses takeover while the current arm is still speaking", () => {
+    const pose = standing();
+    pose[POSE.leftWrist] = { x: 0.6, y: 0.4, z: -0.4, visibility: 1 }; // mid-reach
+    pose[POSE.rightWrist] = { x: 0.35, y: 0.2, z: 0, visibility: 1 }; // raised
+    expect(pickActiveArm(pose, "left")).toBe("left");
+  });
+
+  it("refuses takeover by an idle arm even when the current arm rests", () => {
+    const pose = standing();
+    pose[POSE.leftWrist] = { x: 0.65, y: 0.7, z: 0, visibility: 1 };
+    expect(pickActiveArm(pose, "left")).toBe("left");
+  });
+
+  it("hands an invisible wrist over only to an engaged arm, else null", () => {
     const pose = standing();
     pose[POSE.leftWrist] = { x: 0.65, y: 0.62, z: 0, visibility: 0.1 };
+    // Idle other arm inherits nothing — the far grace window re-picks fresh.
+    expect(pickActiveArm(pose, "left")).toBeNull();
+    pose[POSE.rightWrist] = { x: 0.35, y: 0.2, z: 0, visibility: 1 }; // raised
     expect(pickActiveArm(pose, "left")).toBe("right");
     pose[POSE.rightWrist] = { x: 0.35, y: 0.62, z: 0, visibility: 0.1 };
     expect(pickActiveArm(pose, "left")).toBeNull();

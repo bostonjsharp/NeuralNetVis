@@ -117,15 +117,43 @@ export function reachEvidence(pose: PoseLandmark[], side: Side): PenEvidence {
  *  so drawing needs the same comfortable arm travel at any distance. */
 export const POSE_PAD_REACH = 2.5;
 
-/** Sticky active-arm choice, mirroring pickPrimaryHand: keep the current
- *  arm while its wrist reads; otherwise the higher visible wrist wins.
- *  (Pose sides are stable identities — no distance-matching needed.) */
+/** The arm is speaking a far-tier verb — the wake raise, the brain-cycle
+ *  arm-out, or a reach with live pen-down drive. Takeover eligibility, not
+ *  a gesture in itself. */
+export function armEngaged(pose: PoseLandmark[], side: Side): boolean {
+  return poseRaised(pose, side) || armOut(pose, side) || reachEvidence(pose, side).fist > 0;
+}
+
+/** Wrist hanging past the same-side hip — the cue reachEvidence already
+ *  trusts for a firm pen-up. Only a resting arm may be taken over from. */
+export function armResting(pose: PoseLandmark[], side: Side): boolean {
+  const wrist = wristOf(pose, side);
+  const hip = hipOf(pose, side);
+  return visible(wrist) && visible(hip) && wrist.y > hip.y;
+}
+
+/** Active-arm choice, sticky like pickPrimaryHand — but an engaged other
+ *  arm takes over the moment the current one rests past its hip, so a
+ *  visitor who swaps hands isn't locked out until tracking drops. A
+ *  vanished wrist hands over only to an engaged arm; otherwise null lets
+ *  the pipeline's far grace window re-pick fresh. On acquisition an engaged
+ *  wrist beats a merely higher one (`<=` ties to left). (Pose sides are
+ *  stable identities — no distance-matching needed.) */
 export function pickActiveArm(pose: PoseLandmark[], last: Side | null): Side | null {
-  const leftOk = visible(pose[POSE.leftWrist]);
-  const rightOk = visible(pose[POSE.rightWrist]);
-  if (last === "left" && leftOk) return "left";
-  if (last === "right" && rightOk) return "right";
+  const wristOk = (side: Side) => visible(wristOf(pose, side));
+  if (last !== null) {
+    const other: Side = last === "left" ? "right" : "left";
+    if (wristOk(last)) {
+      const takeover = wristOk(other) && armEngaged(pose, other) && armResting(pose, last);
+      return takeover ? other : last;
+    }
+    return wristOk(other) && armEngaged(pose, other) ? other : null;
+  }
+  const leftOk = wristOk("left");
+  const rightOk = wristOk("right");
   if (leftOk && rightOk) {
+    const leftEngaged = armEngaged(pose, "left");
+    if (leftEngaged !== armEngaged(pose, "right")) return leftEngaged ? "left" : "right";
     return pose[POSE.leftWrist].y <= pose[POSE.rightWrist].y ? "left" : "right";
   }
   if (leftOk) return "left";

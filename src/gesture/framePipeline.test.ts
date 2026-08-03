@@ -242,6 +242,15 @@ const armOutBody = (): PoseLandmark[] => {
   return pose;
 };
 
+/** Left arm dropped past the hip (resting) while the right wrist is raised —
+ *  the takeover posture. */
+const takeoverBody = (): PoseLandmark[] => {
+  const pose = standingBody();
+  pose[POSE.leftWrist] = { x: 0.65, y: 0.7, z: 0, visibility: 1 };
+  pose[POSE.rightWrist] = { x: 0.38, y: 0.2, z: 0, visibility: 1 };
+  return pose;
+};
+
 const crossedBody = (): PoseLandmark[] => {
   const pose = standingBody();
   pose[POSE.leftElbow] = { x: 0.6, y: 0.5, z: 0, visibility: 1 };
@@ -343,6 +352,48 @@ describe("FramePipeline far tier", () => {
     );
     expect(out.state).toMatchObject({ present: false });
     expect(pipeline.update(frame({ poseRan: true, nowMs: 9999 })).state).toBeNull();
+  });
+
+  it("lets a raised arm take over from a resting one", () => {
+    const pipeline = new FramePipeline();
+    run(pipeline, 5, { poseRan: true, bodyPose: raisedBody() }); // left active
+    const out = run(
+      pipeline,
+      3,
+      { poseRan: true, bodyPose: takeoverBody(), wantDebug: true },
+      5 * 33
+    );
+    expect(out.debug?.farReach?.side).toBe("right");
+    expect(out.state).toMatchObject({ present: true, raised: true });
+  });
+
+  it("keeps the active arm through a reach even when the other arm raises", () => {
+    const pipeline = new FramePipeline();
+    run(pipeline, 8, { poseRan: true, bodyPose: reachingBody() }); // pen down, left
+    const contested = reachingBody();
+    contested[POSE.rightWrist] = { x: 0.38, y: 0.2, z: 0, visibility: 1 };
+    const out = run(
+      pipeline,
+      3,
+      { poseRan: true, bodyPose: contested, wantDebug: true },
+      8 * 33
+    );
+    expect(out.debug?.farReach?.side).toBe("left");
+    expect(out.state).toMatchObject({ pose: "fist", raised: false });
+  });
+
+  it("re-seeds the cursor at pad center on an arm takeover", () => {
+    const pipeline = new FramePipeline();
+    run(pipeline, 5, { poseRan: true, bodyPose: raisedBody() });
+    const moved = raisedBody();
+    moved[POSE.leftWrist] = { x: 0.72, y: 0.2, z: 0, visibility: 1 };
+    const dragged = run(pipeline, 30, { poseRan: true, bodyPose: moved }, 5 * 33);
+    expect(dragged.state!.x).toBeLessThan(0.45);
+    // Takeover: the new arm's pad re-anchors — the cursor recenters instead
+    // of slamming across from the old arm's box.
+    const out = run(pipeline, 5, { poseRan: true, bodyPose: takeoverBody() }, 35 * 33);
+    expect(Math.abs(out.state!.x - 0.5)).toBeLessThan(0.02);
+    expect(out.state).toMatchObject({ pose: "open" });
   });
 
   it("exposes tier, body pose, and reach charge to the debug overlay", () => {
