@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { perf } from "../app/perf";
 import { RAISE_LINE, WRIST } from "../gesture/handGesture";
 import type { HandDebugFrame } from "../gesture/handTracker";
+import { POSE, POSE_VISIBILITY_MIN } from "../gesture/poseGesture";
 
 /** MediaPipe hand skeleton edges, for drawing. */
 const BONES: readonly [number, number][] = [
@@ -11,6 +12,15 @@ const BONES: readonly [number, number][] = [
   [9, 13], [13, 14], [14, 15], [15, 16],
   [13, 17], [17, 18], [18, 19], [19, 20],
   [0, 17],
+];
+
+/** Upper-body pose segments — the far tier's raw signal. */
+const POSE_BONES: readonly [number, number][] = [
+  [POSE.leftShoulder, POSE.rightShoulder],
+  [POSE.leftShoulder, POSE.leftElbow],
+  [POSE.leftElbow, POSE.leftWrist],
+  [POSE.rightShoulder, POSE.rightElbow],
+  [POSE.rightElbow, POSE.rightWrist],
 ];
 
 /** Colour by what the gesture recognizer named, not by a derived pose —
@@ -94,6 +104,28 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
 
       if (!frame) return;
 
+      // Upper-body skeleton — bright when the far tier is driving, faint
+      // otherwise; segment alpha tracks landmark visibility so a flaky
+      // reading is visibly flaky.
+      if (frame.bodyPose) {
+        ctx.lineWidth = 2.5;
+        for (const [a, b] of POSE_BONES) {
+          const pa = frame.bodyPose[a];
+          const pb = frame.bodyPose[b];
+          if (!pa || !pb) continue;
+          const vis = Math.min(pa.visibility ?? 1, pb.visibility ?? 1);
+          if (vis < POSE_VISIBILITY_MIN) continue;
+          ctx.strokeStyle =
+            frame.tier === "far"
+              ? `rgba(125, 255, 154, ${vis.toFixed(2)})`
+              : `rgba(141, 151, 180, ${(vis * 0.7).toFixed(2)})`;
+          ctx.beginPath();
+          ctx.moveTo(mx(pa.x), pa.y * VIEW_H);
+          ctx.lineTo(mx(pb.x), pb.y * VIEW_H);
+          ctx.stroke();
+        }
+      }
+
       // Forearms from the body-pose model — the long-range ✕ signal
       if (frame.forearms) {
         const f = frame.forearms;
@@ -150,15 +182,19 @@ export default function DebugPanel({ dataRef }: { dataRef: React.RefObject<Debug
       }
 
       const s = frame.state;
-      // The charge bar is the thing to watch when the pen misbehaves: it
-      // shows the latch filling toward ✊ (0.7) and bleeding back to ✋ (0.3).
       const filled = Math.round(frame.charge * 10);
+      const reach = frame.farReach;
+      const reachFilled = reach ? Math.round(reach.charge * 10) : 0;
       status.textContent = [
+        `tier: ${frame.tier ?? "—"}`,
         `hands: ${frame.hands.length}`,
         `pen ${"█".repeat(filled)}${"░".repeat(10 - filled)} ${frame.charge.toFixed(2)}`,
+        reach
+          ? `reach(${reach.side}) ${"█".repeat(reachFilled)}${"░".repeat(10 - reachFilled)} ${reach.charge.toFixed(2)}`
+          : "reach —",
         `✕: ${frame.crossed}${frame.forearms ? ` (arms ${frame.forearms.crossed ? "crossed" : "apart"})` : " (no body pose)"}`,
         s
-          ? `emitted: ${s.present ? `${s.pose}${s.raised ? " · raised" : ""} @ ${s.x.toFixed(2)},${s.y.toFixed(2)}` : "absent"}`
+          ? `emitted: ${s.present ? `${s.pose}${s.raised ? " · raised" : ""}${s.thumbsUp ? " · 👍" : ""} @ ${s.x.toFixed(2)},${s.y.toFixed(2)}` : "absent"}`
           : "emitted: —",
       ].join("   |   ");
     };
