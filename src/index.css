@@ -282,114 +282,10 @@ body {
   position: relative;
 }
 
-/* Hand-gesture cursor over the pad: hollow ring while hovering (open
-   hand), filled when drawing (fist). */
-.gesture-cursor {
-  position: absolute;
-  width: 34px;
-  height: 34px;
-  margin: -17px 0 0 -17px;
-  border-radius: 50%;
-  border: 3px solid var(--cool);
-  box-shadow: 0 0 14px rgba(77, 191, 255, 0.7);
-  pointer-events: none;
-}
-
-.gesture-cursor[data-drawing="true"] {
-  background: var(--cool);
-  border-color: #fff;
-}
-
-.hud-panel__gesture {
+/* Phone-link hint beside the pad while a visitor's phone is connected */
+.hud-panel__phone {
   font-size: 20px;
   color: var(--cool);
-}
-
-/* ---- raise-hand-to-start progress ring (attract mode) ---- */
-
-.wake-ring-wrap {
-  position: absolute;
-  top: 42%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 22px;
-  pointer-events: none;
-}
-
-.wake-ring-face {
-  position: relative;
-  width: 220px;
-  height: 220px;
-  display: grid;
-  place-items: center;
-}
-
-.wake-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  /* conic-gradient fill set inline from wakeProgress; masked to a donut */
-  -webkit-mask: radial-gradient(closest-side, transparent 66%, #000 67%);
-  mask: radial-gradient(closest-side, transparent 66%, #000 67%);
-  filter: drop-shadow(0 0 22px rgba(77, 191, 255, 0.55));
-}
-
-.wake-ring__hand {
-  font-size: 92px;
-}
-
-.wake-ring__label {
-  font-size: 38px;
-  font-weight: 700;
-  color: var(--cool);
-  text-shadow: 0 0 20px rgba(77, 191, 255, 0.6);
-  white-space: nowrap;
-}
-
-/* ---- gesture debug overlay (dev: G key or ?debug) ---- */
-
-.debug-panel {
-  position: absolute;
-  top: 150px;
-  right: 44px;
-  width: 560px;
-  border: 2px solid rgba(125, 255, 154, 0.5);
-  border-radius: 14px;
-  overflow: hidden;
-  background: rgba(5, 8, 20, 0.9);
-  z-index: 10;
-}
-
-.debug-panel__view {
-  position: relative;
-  width: 560px;
-  height: 315px;
-}
-
-.debug-panel__video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transform: scaleX(-1); /* selfie view */
-}
-
-.debug-panel__overlay {
-  position: absolute;
-  inset: 0;
-}
-
-.debug-panel__status {
-  padding: 10px 14px;
-  font-size: 17px;
-  font-family: Consolas, monospace;
-  color: #7dff9a;
-  white-space: nowrap;
-  overflow: hidden;
 }
 
 .hud-panel__clear {
@@ -691,12 +587,4 @@ body {
   margin-top: 8px;
   font-size: 25px;
   color: var(--ink-dim);
-}
-
-/* Brain-cycle hold ring hovers just above the picker it acts on */
-.wake-ring-wrap--brain {
-  top: auto;
-  bottom: 250px;
-  left: 1732px;
-  transform: translateX(-50%);
 }

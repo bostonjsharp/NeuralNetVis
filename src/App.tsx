@@ -12,9 +12,7 @@ import { attractPlan, createAttractScheduler, type AttractScheduler } from "./ap
 import { initialState, reduce, type InferenceSummary } from "./app/state";
 import Hud from "./hud/Hud";
 import Stage from "./hud/Stage";
-import { GestureController } from "./gesture/gestureController";
-import { startHandTracking, type GestureState } from "./gesture/handTracker";
-import DebugPanel, { type DebugData } from "./hud/DebugPanel";
+import { connectPhone } from "./input/phone";
 import type { DrawPadHandle } from "./hud/DrawPad";
 import type { ForwardResult } from "./nn/inference";
 import { createStagedPass } from "./nn/stagedPass";
@@ -49,15 +47,8 @@ export default function App() {
   const prevSummaryRef = useRef<InferenceSummary | null>(null);
   const prevPixelsRef = useRef<Float32Array | null>(null);
   const [padReset, setPadReset] = useState(0);
-  const [gestureActive, setGestureActive] = useState(false);
-  const [wakeProgress, setWakeProgress] = useState(0);
+  const [phoneActive, setPhoneActive] = useState(false);
   const padRef = useRef<DrawPadHandle>(null);
-  const [debugOpen, setDebugOpen] = useState(
-    () => new URLSearchParams(window.location.search).has("debug")
-  );
-  const debugOpenRef = useRef(debugOpen);
-  debugOpenRef.current = debugOpen;
-  const debugDataRef = useRef<DebugData>({ video: null, frame: null });
   const cinematicTimer = useRef(0);
   const autoFireTimer = useRef(0);
   /** The most recent classified input — re-fired through a freshly swapped brain. */
@@ -224,110 +215,52 @@ export default function App() {
     setDisplayed(null);
   });
 
-  // Optional webcam hand control, tuned for a camera 2+ meters away:
-  // raise a hand and HOLD IT ~5s (a progress ring fills) to start, then
-  // ✊ fist = pen down, ✋ open = pen lifted between strokes, 👍 held =
-  // switch brains, and crossing both arms in an ✕ clears the pad.
-  // Fails silently into mouse-only when
-  // there's no camera/permission. All hold-timing and latching rules live
-  // in GestureController (pure, unit-tested); this effect only interprets
-  // its commands against dispatch/DrawPad.
+  // Phone controls: footron serves our controls panel to the visitor's phone
+  // and routes its messages here. The pen stream drives the exact same
+  // DrawPadHandle path the mouse does; connecting at all wakes the wall, so
+  // by the time a finger touches the phone pad the wall pad exists. No-ops
+  // entirely off the wall (see phoneEnabled).
   useEffect(() => {
-    // ?nocam: A/B lever for hunting render hitches — runs the exact same app
-    // with the vision pipeline (and its main-thread cost) absent.
-    if (new URLSearchParams(window.location.search).has("nocam")) return;
-    let dispose: (() => void) | undefined;
-    let cancelled = false;
-    const controller = new GestureController();
-    // Idle-reset only needs to know a hand exists at second granularity —
-    // dispatching per camera frame ran the listener 60×/s for nothing.
+    // Idle-reset only needs to know a phone is active at second granularity —
+    // dispatching per pen-move would run the listener ~30×/s for nothing.
     let lastActivityDispatch = 0;
-    const onGesture = (g: GestureState) => {
+    const activity = () => {
       const now = performance.now();
-      if (g.present && now - lastActivityDispatch > 1000) {
+      if (now - lastActivityDispatch > 1000) {
         lastActivityDispatch = now;
-        window.dispatchEvent(new Event("gesture-activity"));
+        window.dispatchEvent(new Event("phone-activity"));
       }
-      for (const cmd of controller.update(g, stateRef.current.mode, now)) {
+    };
+    return connectPhone({
+      onConnect: () => {
+        setPhoneActive(true);
+        activity();
+        dispatch({ type: "userActive" });
+      },
+      onCommand: (cmd) => {
+        activity();
+        // Any phone input claims the wall — a visitor drawing mid-attract
+        // should never have strokes land on a pad that isn't there yet.
+        if (stateRef.current.mode === "attract") dispatch({ type: "userActive" });
         switch (cmd.type) {
-          case "wake":
-            dispatch({ type: "userActive" });
-            break;
-          case "wakeProgress":
-            setWakeProgress(cmd.value);
+          case "pen":
+            if (cmd.action === "down") {
+              padRef.current?.penDown(cmd.x * DRAW_PAD_SIZE, cmd.y * DRAW_PAD_SIZE);
+            } else if (cmd.action === "move") {
+              padRef.current?.penMove(cmd.x * DRAW_PAD_SIZE, cmd.y * DRAW_PAD_SIZE);
+            } else {
+              padRef.current?.penUp();
+            }
             break;
           case "clear":
             handleClear();
             break;
-          case "cycleBrain":
+          case "brain":
             dispatch({ type: "selectBrain", id: nextVariantId(stateRef.current.brainId) });
             break;
-          case "penDown":
-            padRef.current?.penDown(cmd.x * DRAW_PAD_SIZE, cmd.y * DRAW_PAD_SIZE);
-            break;
-          case "penMove":
-            padRef.current?.penMove(cmd.x * DRAW_PAD_SIZE, cmd.y * DRAW_PAD_SIZE);
-            break;
-          case "penUp":
-            padRef.current?.penUp();
-            break;
-          case "cursor":
-            padRef.current?.setCursor(
-              cmd.cursor && {
-                x: cmd.cursor.x * DRAW_PAD_SIZE,
-                y: cmd.cursor.y * DRAW_PAD_SIZE,
-                drawing: cmd.cursor.drawing,
-              }
-            );
-            break;
         }
-      }
-    };
-    // Windows webcams are typically single-consumer — if another app holds
-    // the camera at load, keep retrying instead of giving up forever.
-    let retryTimer = 0;
-    const attempt = () => {
-      startHandTracking(
-        onGesture,
-        {
-          attachVideo: (video) => {
-            debugDataRef.current.video = video;
-          },
-          wantFrames: () => debugOpenRef.current,
-          onFrame: (frame) => {
-            debugDataRef.current.frame = frame;
-          },
-        },
-        {
-          // In attract mode the only gesture that matters is a 5-second
-          // hold — ~30Hz reads it fine and halves inference GPU load,
-          // leaving the attract cinematic its full frame budget. Strokes
-          // get every camera frame.
-          captureIntervalMs: () =>
-            stateRef.current.mode === "attract" ? 33 : 0,
-        }
-      )
-        .then((stop) => {
-          if (cancelled) stop();
-          else {
-            dispose = stop;
-            setGestureActive(true);
-          }
-        })
-        .catch((err: unknown) => {
-          console.warn(
-            "hand tracking unavailable (no camera, permission denied, or camera in use) — retrying in 15s:",
-            err instanceof Error ? err.message : err
-          );
-          if (!cancelled) retryTimer = window.setTimeout(attempt, 15_000);
-        });
-    };
-    attempt();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(retryTimer);
-      dispose?.();
-    };
+      },
+    });
   }, []);
 
   const fireInteractive = (
@@ -386,11 +319,9 @@ export default function App() {
     fireInteractive(decodeSamplePixels(sample.pixels), "sample", sample.label);
   };
 
-  // Dev-only: G toggles the gesture debug overlay (also via ?debug);
-  // B cycles through the brain variants.
+  // Dev-only: B cycles through the brain variants.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "g" || e.key === "G") setDebugOpen((open) => !open);
       if (e.key === "b" || e.key === "B") {
         dispatch({ type: "selectBrain", id: nextVariantId(stateRef.current.brainId) });
       }
@@ -426,8 +357,7 @@ export default function App() {
         comparison={comparison}
         padReset={padReset}
         padRef={padRef}
-        gestureActive={gestureActive}
-        wakeProgress={wakeProgress}
+        phoneActive={phoneActive}
         onStrokeStart={handleStrokeStart}
         onDraw={handleDraw}
         onStrokeEnd={handleStrokeEnd}
@@ -435,7 +365,6 @@ export default function App() {
         onSelectBrain={(id) => dispatch({ type: "selectBrain", id })}
         onClear={handleClear}
       />
-      {debugOpen && <DebugPanel dataRef={debugDataRef} />}
     </Stage>
   );
 }

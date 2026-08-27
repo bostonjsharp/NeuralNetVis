@@ -16,6 +16,10 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- The wall's phone-controls client. Plain script, not a module: it is a UMD
+         build that defines globalThis.FootronMessaging, and src/input/phone.ts
+         treats its absence as "no phone controls" rather than as an error. -->
+    <script src="./footron-messaging.development.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

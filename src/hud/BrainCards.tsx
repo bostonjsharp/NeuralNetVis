@@ -11,9 +11,8 @@ interface BrainCardsProps {
 
 /**
  * The brain picker: one card per trained variant, with an honest test
- * accuracy and a mini architecture glyph. Click/tap is the primary input
- * (works via the QR phone cursor and controllers); gestures cycle brains
- * through the raise-and-hold verb instead.
+ * accuracy and a mini architecture glyph. Click/tap is the primary input;
+ * the phone panel's "switch brain" button cycles them instead.
  */
 export default function BrainCards({ activeId, disabled, readOnly, onSelect }: BrainCardsProps) {
   return (

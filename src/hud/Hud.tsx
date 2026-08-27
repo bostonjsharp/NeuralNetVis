@@ -18,10 +18,8 @@ interface HudProps {
   comparison: InferenceSummary | null;
   padReset: number;
   padRef: Ref<DrawPadHandle>;
-  /** True when webcam hand tracking is running. */
-  gestureActive: boolean;
-  /** 0..1 fill of the raise-hand hold (wake in attract, brain-cycle here). */
-  wakeProgress: number;
+  /** True once a visitor's phone has joined via the wall's QR code. */
+  phoneActive: boolean;
   onStrokeStart: () => void;
   onDraw: (pixels: Float32Array, width: number, height: number) => void;
   onStrokeEnd: (pixels: Float32Array, width: number, height: number) => void;
@@ -37,8 +35,7 @@ export default function Hud({
   comparison,
   padReset,
   padRef,
-  gestureActive,
-  wakeProgress,
+  phoneActive,
   onStrokeStart,
   onDraw,
   onStrokeEnd,
@@ -71,26 +68,10 @@ export default function Hud({
             </div>
           )}
           <div className="hud-hint">
-            {gestureActive
-              ? "Raise your hand ✋ and hold it there — or move the mouse — to try it"
+            {phoneActive
+              ? "Draw a digit on your phone 📱 — or move the mouse — to try it"
               : "Move the mouse to try it yourself"}
           </div>
-          {wakeProgress > 0 && (
-            <div className="wake-ring-wrap">
-              <div className="wake-ring-face">
-                <div
-                  className="wake-ring"
-                  style={{
-                    background: `conic-gradient(var(--cool) ${wakeProgress * 360}deg, rgba(80, 110, 180, 0.22) 0deg)`,
-                  }}
-                />
-                <span className="wake-ring__hand">✋</span>
-              </div>
-              <div className="wake-ring__label">
-                Keep your hand up… {Math.ceil((1 - wakeProgress) * 5)}
-              </div>
-            </div>
-          )}
           <BrainCards activeId={brainId} disabled readOnly onSelect={onSelectBrain} />
           <FactCards />
         </>
@@ -109,9 +90,9 @@ export default function Hud({
               <div className="hud-panel__title">
                 {mode === "morph" ? "Rewiring…" : busy ? "Thinking…" : "Draw a digit 0–9"}
               </div>
-              {gestureActive && !busy && (
-                <div className="hud-panel__gesture">
-                  ✊ draws · ✋ lifts the pen · 👍 switches brains · cross your arms ✕ to clear
+              {phoneActive && !busy && (
+                <div className="hud-panel__phone">
+                  📱 your phone is connected — finger-draw there, it lands here
                 </div>
               )}
               <button className="hud-panel__clear" onClick={onClear} disabled={busy}>
@@ -122,20 +103,6 @@ export default function Hud({
             </div>
           </div>
           <BrainCards activeId={brainId} disabled={busy} onSelect={onSelectBrain} />
-          {wakeProgress > 0 && (
-            <div className="wake-ring-wrap wake-ring-wrap--brain">
-              <div className="wake-ring-face">
-                <div
-                  className="wake-ring"
-                  style={{
-                    background: `conic-gradient(var(--warm) ${wakeProgress * 360}deg, rgba(80, 110, 180, 0.22) 0deg)`,
-                  }}
-                />
-                <span className="wake-ring__hand">👍</span>
-              </div>
-              <div className="wake-ring__label">Keep that 👍 up…</div>
-            </div>
-          )}
           <aside className="hud-output">
             {displayed && (
               <div className="hud-verdict">

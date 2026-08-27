@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 
-/** "gesture-activity" is dispatched by the hand tracker while a hand is in
- *  view, so gesture visitors don't get idle-reset mid-drawing. */
-const ACTIVITY_EVENTS = ["pointerdown", "pointermove", "keydown", "gesture-activity"] as const;
+/** "phone-activity" is dispatched while phone commands are arriving, so
+ *  phone visitors don't get idle-reset mid-drawing. */
+const ACTIVITY_EVENTS = ["pointerdown", "pointermove", "keydown", "phone-activity"] as const;
 
 /**
  * Kiosk walk-away detection (ported from LifeOfLLM): while `active`, any

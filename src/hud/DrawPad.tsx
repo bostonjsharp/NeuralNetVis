@@ -17,28 +17,25 @@ interface DrawPadProps {
 }
 
 /**
- * Imperative pen interface so hand gestures drive the exact same drawing
- * path as the mouse. Coordinates are in pad space (0..DRAW_PAD_SIZE).
+ * Imperative pen interface so the phone controller drives the exact same
+ * drawing path as the mouse. Coordinates are in pad space (0..DRAW_PAD_SIZE).
  */
 export interface DrawPadHandle {
   penDown(x: number, y: number): void;
   penMove(x: number, y: number): void;
   penUp(): void;
-  /** Position the gesture cursor (null hides it). Visual only. */
-  setCursor(cursor: { x: number; y: number; drawing: boolean } | null): void;
 }
 
 /**
  * Freehand digit pad. The backing canvas is DRAW_PAD_SIZE² and downsampled
- * to 28×28 by the caller; strokes are thick and round-capped so a finger-,
- * mouse-, or gesture-drawn digit lands in MNIST's stroke-width ballpark.
+ * to 28×28 by the caller; strokes are thick and round-capped so a finger-
+ * or mouse-drawn digit lands in MNIST's stroke-width ballpark.
  */
 const DrawPad = forwardRef<DrawPadHandle, DrawPadProps>(function DrawPad(
   { disabled, resetKey, onStrokeStart, onDraw, onStrokeEnd },
   ref
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const cursorRef = useRef<HTMLDivElement>(null);
   const drawingRef = useRef(false);
   const lastRef = useRef<{ x: number; y: number } | null>(null);
   const lastEmitRef = useRef(0);
@@ -100,18 +97,6 @@ const DrawPad = forwardRef<DrawPadHandle, DrawPadProps>(function DrawPad(
     penDown,
     penMove,
     penUp,
-    setCursor(cursor) {
-      const el = cursorRef.current;
-      if (!el) return;
-      if (!cursor) {
-        el.style.display = "none";
-        return;
-      }
-      el.style.display = "block";
-      el.style.left = `${(cursor.x / DRAW_PAD_SIZE) * 100}%`;
-      el.style.top = `${(cursor.y / DRAW_PAD_SIZE) * 100}%`;
-      el.dataset.drawing = String(cursor.drawing);
-    },
   }));
 
   const toPadCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -143,7 +128,6 @@ const DrawPad = forwardRef<DrawPadHandle, DrawPadProps>(function DrawPad(
         onPointerLeave={penUp}
         aria-label="drawing pad"
       />
-      <div ref={cursorRef} className="gesture-cursor" style={{ display: "none" }} />
     </div>
   );
 });

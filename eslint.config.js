@@ -4,7 +4,9 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["web/", "public/", "node_modules/", ".mnist-cache/", ".remember/"] },
+  // controls/ is compiled and linted by footron-data's build against
+  // footron-web's own eslint config — this repo's parser has no JSX set up.
+  { ignores: ["web/", "public/", "node_modules/", ".mnist-cache/", ".remember/", "controls/"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -23,7 +25,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["scripts/**/*.mjs", "vite.config.ts"],
+    files: ["scripts/**/*.mjs", "dev/**/*.mjs", "vite.config.ts"],
     languageOptions: { globals: globals.node },
   }
 );

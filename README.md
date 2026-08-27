@@ -12,27 +12,20 @@ the browser — every glowing pulse you see is real math.
   sample), and watch *your* drawing get normalized, streamed through the
   layers, and answered — with honest confidence ("got it, 32% sure" happens,
   and that's the lesson).
-- **Hand gestures (webcam, optional):** raise a hand ✋ and hold it — a
-  progress ring fills over 5 seconds, then you're in. ✊ a closed fist is
-  pen-down, ✋ an open hand lifts the pen to reposition between strokes,
-  a held 👍 switches brains, and crossing both arms in an ✕ clears the
-  pad. The drawing auto-fires
-  once the pen stays up. Tuned for a camera 2+ meters away: gestures are
-  arm-scale (no finger-counting poses), fist/open only register when
-  clearly clenched/splayed, tracking blips get a grace window, and hands
-  too small in frame are filtered out. MediaPipe hand tracking runs
-  locally (assets staged into `public/` by `npm install`) **in a dedicated
-  worker**, so WASM inference never steals frame budget from the render
-  loop — with a same-logic main-thread fallback if the worker can't start,
-  and mouse-only if there's no camera or permission. `?debug` (or the G
-  key) opens the camera overlay plus a live frame-time/inference readout;
-  `?nocam` disables the vision pipeline for A/B perf comparisons.
+- **Phone controls (footron):** scan the wall's QR code and a draw pad opens
+  on your phone (`controls/lib/index.js`, served by footron). Finger-draw a
+  digit — strokes render locally at full rate and stream to the wall at
+  ~30Hz over footron's messaging router, where they replay through the exact
+  same `DrawPadHandle` path the mouse uses. Connecting wakes the wall;
+  buttons clear the pad and cycle brains. The client arms only when footron
+  passes `?ftMsgUrl` (or `?ftmsg=1` against the dev mock: `npm run mock`,
+  then draw at http://localhost:8089/).
 - **Color language:** orange connections excite the next neuron, blue ones
   inhibit; brightness = activation strength.
 - **Architecture playground (brain swap):** four pre-trained brains ship in
   the app — Straight-through `784→10` (92.2%), Tiny `784→8→10` (93.0%),
   Classic `784→16→16→10` (95.6%), and Wide `784→32→32→10` (97.3%). Pick a
-  brain card (or hold a 👍 for 1.5s with gestures) and the network
+  brain card (or tap "switch brain" on your phone) and the network
   visibly *rewires* — the middle implodes and the new topology cascades in
   while the input plane and output column hold still — then the same digit
   re-fires through the new brain with a cross-brain comparison verdict
@@ -79,6 +72,9 @@ committed brain against the runtime forward pass so they can never drift.
   20px scale, center-of-mass centering — mandatory for drawn-digit accuracy).
 - `src/app/` — pure reducer state machine (`attract → draw → infer → result`)
   and the attract-loop sample scheduler.
+- `src/input/` — phone-controls protocol (pure, unit-tested) and the
+  connection to footron's messaging router; `controls/lib/` is the panel
+  footron serves to the phone, `dev/messaging-mock.mjs` a local router mock.
 - `src/scene/` — Three.js. `SceneManager.ts` is the only WebGL touchpoint;
   layout (`NetworkLayout.ts`) and cinematic timing (`fire.ts`) are pure and
   unit-tested. Instanced neurons, one-draw-call connection lines, a GPU
@@ -90,5 +86,5 @@ committed brain against the runtime forward pass so they can never drift.
 
 `config.json`, `wide.jpg`, `thumb.jpg`, and the built `web/` folder follow
 the [footron-data](https://github.com/BYU-PCCL/footron-data) experience
-layout. Input is mouse-first for now; controller/phone mapping arrives with
-footron integration.
+layout; `controls/lib/index.js` is the phone-controls panel footron-data's
+build compiles against footron-web.
