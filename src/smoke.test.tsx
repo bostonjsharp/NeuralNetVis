@@ -21,7 +21,9 @@ describe("App", () => {
   it("boots into attract mode with the title and education visible", () => {
     render(<App />);
     expect(screen.getByText("Inside a Neural Network")).toBeTruthy();
-    expect(screen.getByText(/move the mouse/i)).toBeTruthy();
+    // The wall has no mouse — the only way in is the QR code.
+    expect(screen.getByText(/scan the qr code with your phone/i)).toBeTruthy();
+    expect(screen.queryByText(/mouse/i)).toBeNull();
     expect(screen.getByText(/excites/)).toBeTruthy();
     expect(screen.getByText("HIDDEN LAYERS")).toBeTruthy();
   });

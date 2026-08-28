@@ -141,7 +141,7 @@ export function createScene(
   scene.add(starfield.points, inputPlane.mesh, connections.lines, neurons.mesh);
   scene.add(pulses.points, glyphs.group, flare.mesh, sparks.points);
 
-  const rig = new CameraRig(camera);
+  const rig = new CameraRig(camera, layout);
   let post = createPostFx(
     renderer,
     scene,
@@ -208,6 +208,8 @@ export function createScene(
     prevPixels.fill(0);
     scene.add(connections.lines, neurons.mesh, pulses.points, sparks.points);
     layerCounts = layout.layerPositions.map((p) => p.length / 3);
+    // A wider brain is a taller brain — reframe before the morph lands.
+    rig.setLayout(layout);
   }
 
   const clock = new THREE.Clock();

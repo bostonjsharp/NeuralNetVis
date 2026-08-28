@@ -31,6 +31,11 @@ const OUTPUT_SPACING = 1.24;
 export const NEURON_RADIUS_HIDDEN = 0.34;
 export const NEURON_RADIUS_OUTPUT = 0.46;
 
+/** How far past an output neuron its digit sprite reaches (see OutputGlyphs:
+ *  the label sits at radius + 1.05 and swells to ~2× its 1.05 base scale when
+ *  it wins). Camera framing has to allow for it or winners clip at the edge. */
+const OUTPUT_LABEL_REACH = NEURON_RADIUS_OUTPUT + 1.05 + 1.05;
+
 /** Strongest input edges kept per destination neuron (full 12,544 is a hairball). */
 export const INPUT_TOP_K = 32;
 
@@ -50,6 +55,11 @@ export interface NetworkLayout {
   layerPositions: Float32Array[];
   /** Rendered edges per stage: input→first (top-K), then dense. */
   edges: EdgeSet[];
+  /** A handful of extreme world points (xyz-interleaved) that enclose
+   *  everything drawn — the input quad's corners and each column's padded
+   *  ends. CameraRig frames against these, so a taller brain automatically
+   *  buys itself more camera distance instead of clipping. */
+  bounds: Float32Array;
 }
 
 export interface LayoutOptions {
@@ -129,6 +139,8 @@ export function buildLayout(net: Net, options: LayoutOptions = {}): NetworkLayou
     }
   }
 
+  const bounds = buildBounds(layerPositions);
+
   const dense = (layer: number): EdgeSet => {
     const [nIn, nOut] = [shape[layer], shape[layer + 1]];
     const W = net.layers[layer].W;
@@ -152,7 +164,43 @@ export function buildLayout(net: Net, options: LayoutOptions = {}): NetworkLayou
   const edges: EdgeSet[] = [s0];
   for (let l = 1; l < shape.length - 1; l++) edges.push(dense(l));
 
-  return { inputPositions, layerPositions, edges };
+  return { inputPositions, layerPositions, edges, bounds };
+}
+
+/**
+ * The corner points the camera has to keep on screen. The input plane is a
+ * tilted quad (four corners) and every other layer is a vertical segment at
+ * one x (four padded corners each) — a dozen-odd points rather than the ~850
+ * neurons, since only the extremes can ever be the first thing to clip.
+ */
+function buildBounds(layerPositions: Float32Array[]): Float32Array {
+  const points: number[] = [];
+
+  // Input quad, grown by half a pixel so the outer row's quads are covered.
+  const half = ((GRID - 1) / 2) * PIXEL_PITCH + PIXEL_PITCH / 2;
+  const cos = Math.cos(INPUT_TILT_Y);
+  const sin = Math.sin(INPUT_TILT_Y);
+  for (const lx of [-half, half]) {
+    for (const ly of [-half, half]) {
+      points.push(INPUT_CENTER[0] + cos * lx, INPUT_CENTER[1] + ly, INPUT_CENTER[2] - sin * lx);
+    }
+  }
+
+  const lastLayer = layerPositions.length - 1;
+  layerPositions.forEach((positions, layer) => {
+    const output = layer === lastLayer;
+    const radius = output ? NEURON_RADIUS_OUTPUT : NEURON_RADIUS_HIDDEN;
+    // Digit labels hang off the +x side of the output column only.
+    const reach = output ? OUTPUT_LABEL_REACH : radius;
+    const x = positions[0];
+    const top = positions[1];
+    const bottom = positions[positions.length - 2];
+    for (const px of [x - radius, x + reach]) {
+      for (const py of [top + reach, bottom - reach]) points.push(px, py, 0);
+    }
+  });
+
+  return Float32Array.from(points);
 }
 
 /** Indices of the k largest values by magnitude, strongest first. */

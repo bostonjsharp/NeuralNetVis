@@ -69,8 +69,8 @@ export default function Hud({
           )}
           <div className="hud-hint">
             {phoneActive
-              ? "Draw a digit on your phone 📱 — or move the mouse — to try it"
-              : "Move the mouse to try it yourself"}
+              ? "Draw a digit on your phone 📱 — it lands on the wall"
+              : "Scan the QR code with your phone 📱 to try it yourself"}
           </div>
           <BrainCards activeId={brainId} disabled readOnly onSelect={onSelectBrain} />
           <FactCards />
